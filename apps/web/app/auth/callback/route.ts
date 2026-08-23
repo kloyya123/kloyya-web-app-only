@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
@@ -17,9 +18,7 @@ export async function GET(request: NextRequest) {
           setAll(cookiesToSet: { name: string; value: string; options?: CookieOptions }[]) {
             const response = NextResponse.next({ request });
             for (const { name, value, options } of cookiesToSet) {
-              /* eslint-disable @typescript-eslint/no-explicit-any */
               response.cookies.set(name, value, options as any);
-              /* eslint-enable @typescript-eslint/no-explicit-any */
             }
             return response;
           },
