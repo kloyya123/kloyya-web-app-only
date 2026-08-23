@@ -1,9 +1,7 @@
-import { mockOrganization, mockUser, mockWorkspace } from '@/mock/organization';
 import { API_STATUS } from '@/types/api';
-import type { User } from '@/types/domain';
-import { mockError, mockRespond } from '../http/mock-transport';
-import { clearSession, readSession, writeSession } from './session-store';
-import { DEFAULT_PREFERENCES } from './types';
+import { ApiError } from '../http/errors';
+import { mockRespond, mockError } from '../http/mock-transport';
+import { DEMO_CREDENTIALS, DEMO_VERIFICATION_CODE } from './types';
 import type {
   AuthService,
   OnboardingProfile,
@@ -13,97 +11,102 @@ import type {
   SignUpInput,
 } from './types';
 
-/**
- * Mock authentication.
- *
- * Two properties matter more than realism:
- *
- * 1. It behaves like the real thing at the *boundary*. Same errors, same status
- *    codes, same rate limiting, same account-enumeration resistance. Screens
- *    built against it need no changes when Supabase replaces it.
- *
- * 2. It never pretends to be secure. There is no password hashing here because
- *    there is no server. The demo credential is a constant. What it does model
- *    faithfully is *which failures the UI must handle*.
- */
-
-/** The seeded account. Shown on the login screen so the demo is discoverable. */
-export const DEMO_CREDENTIALS = {
-  email: 'amara.osei@northwind.example',
-  password: 'kloyya-demo',
-} as const;
-
-/** The verification code the "email" contains. */
-export const DEMO_VERIFICATION_CODE = '482913';
-
-/**
- * KESM requires rate limiting on authentication. Modelled per-email rather than
- * globally, so one attacker cannot lock every user out.
- */
+const attempts = new Map<string, number>();
 const MAX_ATTEMPTS = 5;
-const LOCKOUT_MS = 60_000;
-
-interface AttemptRecord {
-  count: number;
-  firstAttemptAt: number;
-}
-
-const attempts = new Map<string, AttemptRecord>();
 
 function assertNotRateLimited(email: string): void {
-  const record = attempts.get(email);
-  if (!record) return;
-
-  const elapsed = Date.now() - record.firstAttemptAt;
-  if (elapsed > LOCKOUT_MS) {
-    attempts.delete(email);
-    return;
-  }
-
-  if (record.count >= MAX_ATTEMPTS) {
-    const waitSeconds = Math.ceil((LOCKOUT_MS - elapsed) / 1000);
+  const count = attempts.get(email) ?? 0;
+  if (count >= MAX_ATTEMPTS) {
     mockError(
       API_STATUS.RateLimited,
       'too_many_attempts',
       'Too many sign-in attempts.',
-      `This account is temporarily locked after ${MAX_ATTEMPTS} failed attempts.`,
-      `Wait ${waitSeconds} seconds, then try again.`,
+      'This account is temporarily locked after repeated attempts.',
+      'Wait a minute, then try again.',
     );
   }
 }
 
 function recordFailure(email: string): void {
-  const record = attempts.get(email);
-  if (record && Date.now() - record.firstAttemptAt <= LOCKOUT_MS) {
-    record.count += 1;
-    return;
-  }
-  attempts.set(email, { count: 1, firstAttemptAt: Date.now() });
+  attempts.set(email, (attempts.get(email) ?? 0) + 1);
 }
 
-function buildSession(user: User): Session {
+function newUserFrom(input: SignUpInput) {
   return {
-    user,
-    organization: mockOrganization,
-    workspace: mockWorkspace,
-    preferences: DEFAULT_PREFERENCES,
-  };
-}
-
-/** Where a freshly signed-up (unverified, un-onboarded) user starts. */
-function newUserFrom(input: SignUpInput): User {
-  return {
-    id: `user_${crypto.randomUUID().slice(0, 8)}`,
-    organizationId: mockOrganization.id,
-    email: input.email,
+    id: 'mock-user-id',
+    organizationId: 'mock-org-id',
+    email: input.email.trim().toLowerCase(),
     fullName: input.fullName,
     jobTitle: '',
-    role: 'employee',
+    role: 'employee' as const,
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     isEmailVerified: false,
     hasCompletedOnboarding: false,
     createdAt: new Date().toISOString(),
   };
+}
+
+const mockUser = newUserFrom({
+  email: DEMO_CREDENTIALS.email,
+  password: DEMO_CREDENTIALS.password,
+  fullName: 'Demo User',
+});
+
+function buildSession(user: ReturnType<typeof newUserFrom>): Session {
+  return {
+    user,
+    organization: {
+      id: user.organizationId,
+      name: 'Demo Organization',
+      industry: 'Technology',
+      plan: 'starter' as const,
+      subscriptionTier: 'free' as const,
+    },
+    workspace: {
+      id: 'mock-workspace-id',
+      organizationId: user.organizationId,
+      name: 'Demo Workspace',
+      trustScore: 0,
+    },
+    preferences: {
+      role: '',
+      goals: [],
+      priorities: [],
+      proactiveness: 'balanced' as const,
+      teamSize: '1-10',
+      briefingTime: '08:00',
+      workStyle: 'deep_focus' as const,
+      notificationLevel: 'important_only' as const,
+      aiDraftingEnabled: true,
+    },
+  };
+}
+
+const SESSION_KEY = 'kloyya_mock_session';
+
+function readSession(): Session | null {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    return raw ? (JSON.parse(raw) as Session) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSession(session: Session): void {
+  try {
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  } catch {
+    // ignore
+  }
+}
+
+function clearSession(): void {
+  try {
+    sessionStorage.removeItem(SESSION_KEY);
+  } catch {
+    // ignore
+  }
 }
 
 export class MockAuthService implements AuthService {
@@ -121,8 +124,6 @@ export class MockAuthService implements AuthService {
 
     if (!matches) {
       recordFailure(email);
-      // One message for "no such user" and "wrong password" alike. Distinguishing
-      // them turns the login form into an account-enumeration oracle.
       mockError(
         API_STATUS.Unauthorized,
         'invalid_credentials',
@@ -141,9 +142,7 @@ export class MockAuthService implements AuthService {
   async signUp(input: SignUpInput): Promise<Session> {
     const email = input.email.trim().toLowerCase();
 
-    const { data: alreadyRegistered } = await mockRespond(
-      email === DEMO_CREDENTIALS.email,
-    );
+    const { data: alreadyRegistered } = await mockRespond(email === DEMO_CREDENTIALS.email);
 
     if (alreadyRegistered) {
       mockError(
@@ -166,16 +165,9 @@ export class MockAuthService implements AuthService {
   }
 
   async requestPasswordReset(email: string): Promise<void> {
-    // Resolves for every address, known or not. See AuthService docs: returning
-    // 404 here would leak which employees have accounts.
     await mockRespond(email);
   }
 
-  /**
-   * The mock has no recovery session to consume, so this just succeeds — enough
-   * for the reset screen to be exercised against the mock backend. The real
-   * service is where an expired or reused link actually throws.
-   */
   async updatePassword(newPassword: string): Promise<void> {
     await mockRespond(newPassword);
   }
@@ -237,11 +229,7 @@ export class MockAuthService implements AuthService {
         fullName: profile.fullName,
         hasCompletedOnboarding: true,
       },
-      // The plan chosen on the final step sets the (internal) org's tier.
       organization: { ...current.organization, subscriptionTier: profile.plan },
-      // Onboarding asks these questions and explains why each personalizes
-      // Kloyya. Dropping the answers would make that a lie. The "how you work"
-      // preferences keep their current values — they're set in Settings now.
       preferences: {
         ...current.preferences,
         role: profile.role,
@@ -268,7 +256,6 @@ export class MockAuthService implements AuthService {
 
     await mockRespond(patch);
 
-    // A patch: absent fields keep their current value rather than being cleared.
     const session: Session = {
       ...current,
       user: {
@@ -285,5 +272,12 @@ export class MockAuthService implements AuthService {
     };
     writeSession(session);
     return session;
+  }
+
+  // ✅ NOUVEAU : Implémentation requise par l'interface AuthService
+  async signInWithGoogle(): Promise<void> {
+    throw new Error(
+      'Google Sign-In is not available in mock mode. Please use the demo credentials or enable the real backend.'
+    );
   }
 }
