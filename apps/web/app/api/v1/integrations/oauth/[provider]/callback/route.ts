@@ -17,19 +17,6 @@ import type { ProviderTokens } from '@server/integrations/oauth';
 import { exchangeSlackCode } from '@server/integrations/slack';
 import { decodeState } from '@server/integrations/state';
 
-/**
- * The OAuth redirect-back, shared by every provider.
- *
- * Deliberately NOT session-guarded: the provider sends the browser here, and the
- * cookie may not survive the cross-site redirect. The signed `state` IS the
- * authorization — it proves we started this flow, for this user, recently.
- * Everything trusted comes out of that signature, never the query string. A
- * forged or stale state is where an attacker would graft their account onto
- * someone else's workspace; nothing is written on that path.
- *
- * The caller is a browser, so failures redirect to /connections?status=… rather
- * than returning a JSON envelope.
- */
 type Provider = 'google' | 'notion' | 'slack';
 
 interface ProviderAdapter {
@@ -69,7 +56,7 @@ function adapterFor(provider: Provider): ProviderAdapter | null {
             code,
             clientId: config.NOTION_OAUTH_CLIENT_ID!,
             clientSecret: config.NOTION_OAUTH_CLIENT_SECRET!,
-           redirectUri: config.NOTION_OAUTH_REDIRECT_URI!,
+            redirectUri: config.NOTION_OAUTH_REDIRECT_URI!,
           }),
         store: storeNotionTokens,
       };
@@ -82,7 +69,7 @@ function adapterFor(provider: Provider): ProviderAdapter | null {
             code,
             clientId: config.SLACK_OAUTH_CLIENT_ID!,
             clientSecret: config.SLACK_OAUTH_CLIENT_SECRET!,
-            redirectUri: config.SLACK_OAUTH_REDIRECT_URI,
+            redirectUri: config.SLACK_OAUTH_REDIRECT_URI!,
           }),
         store: storeSlackTokens,
       };
@@ -126,7 +113,6 @@ export async function GET(
   };
   const integrationId = decoded.state.integrationId;
 
-  // The user declined on the consent screen. Not an error to shout about.
   if (providerError || !code) {
     await failConnection(db, start, integrationId, 'The connection was cancelled before it finished.');
     return NextResponse.redirect(back('cancelled', integrationId));
