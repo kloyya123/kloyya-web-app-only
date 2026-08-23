@@ -17,8 +17,9 @@ export async function GET(request: NextRequest) {
           setAll(cookiesToSet: { name: string; value: string; options?: CookieOptions }[]) {
             const response = NextResponse.next({ request });
             for (const { name, value, options } of cookiesToSet) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              /* eslint-disable @typescript-eslint/no-explicit-any */
               response.cookies.set(name, value, options as any);
+              /* eslint-enable @typescript-eslint/no-explicit-any */
             }
             return response;
           },
