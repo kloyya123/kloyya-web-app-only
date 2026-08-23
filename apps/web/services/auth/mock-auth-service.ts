@@ -1,7 +1,9 @@
+import { mockOrganization, mockUser, mockWorkspace } from '@/mock/organization';
 import { API_STATUS } from '@/types/api';
-import { ApiError } from '../http/errors';
-import { mockRespond, mockError } from '../http/mock-transport';
-import { DEMO_CREDENTIALS, DEMO_VERIFICATION_CODE } from './types';
+import type { User } from '@/types/domain';
+import { mockError, mockRespond } from '../http/mock-transport';
+import { clearSession, readSession, writeSession } from './session-store';
+import { DEFAULT_PREFERENCES } from './types';
 import type {
   AuthService,
   OnboardingProfile,
@@ -10,6 +12,29 @@ import type {
   SignInInput,
   SignUpInput,
 } from './types';
+
+/**
+ * Mock authentication.
+ *
+ * Two properties matter more than realism:
+ *
+ * 1. It behaves like the real thing at the *boundary*. Same errors, same status
+ *    codes, same rate limiting, same account-enumeration resistance. Screens
+ *    built against it need no changes when Supabase replaces it.
+ *
+ * 2. It never pretends to be secure. There is no password hashing here because
+ *    there is no server. The demo credential is a constant. What it does model
+ *    faithfully is *which failures the UI must handle*.
+ */
+
+/** The seeded account. Shown on the login screen so the demo is discoverable. */
+export const DEMO_CREDENTIALS = {
+  email: 'amara.osei@northwind.example',
+  password: 'kloyya-demo',
+} as const;
+
+/** The verification code the "email" contains. */
+export const DEMO_VERIFICATION_CODE = '482913';
 
 const attempts = new Map<string, number>();
 const MAX_ATTEMPTS = 5;
@@ -29,84 +54,6 @@ function assertNotRateLimited(email: string): void {
 
 function recordFailure(email: string): void {
   attempts.set(email, (attempts.get(email) ?? 0) + 1);
-}
-
-function newUserFrom(input: SignUpInput) {
-  return {
-    id: 'mock-user-id',
-    organizationId: 'mock-org-id',
-    email: input.email.trim().toLowerCase(),
-    fullName: input.fullName,
-    jobTitle: '',
-    role: 'employee' as const,
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    isEmailVerified: false,
-    hasCompletedOnboarding: false,
-    createdAt: new Date().toISOString(),
-  };
-}
-
-const mockUser = newUserFrom({
-  email: DEMO_CREDENTIALS.email,
-  password: DEMO_CREDENTIALS.password,
-  fullName: 'Demo User',
-});
-
-function buildSession(user: ReturnType<typeof newUserFrom>): Session {
-  return {
-    user,
-    organization: {
-      id: user.organizationId,
-      name: 'Demo Organization',
-      industry: 'Technology',
-      plan: 'starter' as const,
-      subscriptionTier: 'free' as const,
-    },
-    workspace: {
-      id: 'mock-workspace-id',
-      organizationId: user.organizationId,
-      name: 'Demo Workspace',
-      trustScore: 0,
-    },
-    preferences: {
-      role: '',
-      goals: [],
-      priorities: [],
-      proactiveness: 'balanced' as const,
-      teamSize: '1-10',
-      briefingTime: '08:00',
-      workStyle: 'deep_focus' as const,
-      notificationLevel: 'important_only' as const,
-      aiDraftingEnabled: true,
-    },
-  };
-}
-
-const SESSION_KEY = 'kloyya_mock_session';
-
-function readSession(): Session | null {
-  try {
-    const raw = sessionStorage.getItem(SESSION_KEY);
-    return raw ? (JSON.parse(raw) as Session) : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeSession(session: Session): void {
-  try {
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  } catch {
-    // ignore
-  }
-}
-
-function clearSession(): void {
-  try {
-    sessionStorage.removeItem(SESSION_KEY);
-  } catch {
-    // ignore
-  }
 }
 
 export class MockAuthService implements AuthService {
@@ -134,7 +81,12 @@ export class MockAuthService implements AuthService {
     }
 
     attempts.delete(email);
-    const session = buildSession(mockUser);
+    const session: Session = {
+      user: { ...mockUser, email, isEmailVerified: true, hasCompletedOnboarding: true },
+      organization: mockOrganization,
+      workspace: mockWorkspace,
+      preferences: DEFAULT_PREFERENCES,
+    };
     writeSession(session);
     return session;
   }
@@ -154,7 +106,12 @@ export class MockAuthService implements AuthService {
       );
     }
 
-    const session = buildSession(newUserFrom({ ...input, email }));
+    const session: Session = {
+      user: { ...mockUser, email, fullName: input.fullName, isEmailVerified: false, hasCompletedOnboarding: false },
+      organization: mockOrganization,
+      workspace: mockWorkspace,
+      preferences: DEFAULT_PREFERENCES,
+    };
     writeSession(session);
     return session;
   }
