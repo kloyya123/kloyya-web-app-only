@@ -121,5 +121,6 @@ export interface AuthService {
    * the fields present are changed. Throws 401 without a session.
    */
   updateSettings(patch: SettingsPatch): Promise<Session>;
+   signInWithGoogle(): Promise<void>;
 }
 
