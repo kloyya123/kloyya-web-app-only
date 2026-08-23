@@ -127,12 +127,10 @@ export class SupabaseAuthService implements AuthService {
     return apiFetch<Session>('/v1/settings', { method: 'PATCH', body: patch });
   }
 
-  // ✅ NOUVEAU : Méthode pour lancer le flux OAuth Google (Authentification)
   async signInWithGoogle(): Promise<void> {
     const { error } = await this.sb.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        // Cette URL doit être ajoutée dans Supabase > Authentication > URL Configuration > Redirect URLs
         redirectTo: `${window.location.origin}/auth/callback`,
       },
     });
@@ -157,7 +155,12 @@ export class SupabaseAuthService implements AuthService {
   }
 }
 
-interface SupabaseAuthError { message: string; status?: number; code?: string; }
+// ✅ CORRECTION : Ajout explicite de `| undefined` pour satisfaire `exactOptionalPropertyTypes: true`
+interface SupabaseAuthError { 
+  message: string; 
+  status?: number | undefined; 
+  code?: string | undefined; 
+}
 
 function signInError(error: SupabaseAuthError): ApiError {
   const rateLimited = error.status === 429;
