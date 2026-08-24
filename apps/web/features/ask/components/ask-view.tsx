@@ -13,19 +13,6 @@ import { canSpeak, speak } from '@/lib/speech';
 import { useSpeechToText } from '@/hooks/use-speech-to-text';
 import { services, isApiError, type AskAnswer } from '@/services';
 
-/**
- * Ask Kloyya.
- *
- * A question in, an evidence-backed answer out, with the sources cited beneath
- * it. The product's first principle is visible here: the answer never stands
- * alone — the "Sources" list is what Kloyya was allowed to use, drawn from the
- * user's own connected tools.
- *
- * Two failure modes get their own honest treatment rather than a red error box:
- * the assistant not being configured on this server (`ai_unconfigured`) and the
- * model host being briefly down (`ai_unavailable`). Neither is the user's fault,
- * and the copy says so.
- */
 type Phase =
   | { kind: 'idle' }
   | { kind: 'loading' }
@@ -35,7 +22,6 @@ type Phase =
   | { kind: 'error'; message: string };
 
 export interface AskViewProps {
-  /** A question arriving from elsewhere (the dashboard's Ask box) — asked automatically. */
   initialQuestion?: string | undefined;
 }
 
@@ -49,14 +35,9 @@ export function AskView({ initialQuestion }: AskViewProps = {}) {
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Voice input: dictate into the same box, review, then send — not an
-  // auto-send-on-speech assistant. Silently absent where the browser has no
-  // SpeechRecognition (Firefox, notably).
   const { isSupported: canDictate, isListening, start: startDictation, stop: stopDictation } =
     useSpeechToText((transcript) => setQuestion((prev) => (prev ? `${prev} ${transcript}` : transcript)));
 
-  // Upload, then move the user straight into asking about what they added —
-  // the natural next step, not a toast that leads nowhere.
   async function handleFile(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -82,8 +63,6 @@ export function AskView({ initialQuestion }: AskViewProps = {}) {
     try {
       const answer = await services.ask.ask(value);
       setPhase({ kind: 'answered', answer });
-      // A command created something real — the tasks/projects lists elsewhere
-      // in the app need to know, not just this screen.
       if (answer.action?.type === 'task_created') {
         void queryClient.invalidateQueries({ queryKey: ['tasks'] });
       } else if (answer.action?.type === 'project_created') {
@@ -105,13 +84,10 @@ export function AskView({ initialQuestion }: AskViewProps = {}) {
     }
   }
 
-  // A question handed off from elsewhere (e.g. the dashboard's Ask box) is
-  // asked immediately — the user already committed to it there.
   useEffect(() => {
     if (initialQuestion && initialQuestion.trim().length > 0) {
       void submit(initialQuestion);
     }
-    // Only ever fires from the value the page mounted with.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -139,7 +115,6 @@ export function AskView({ initialQuestion }: AskViewProps = {}) {
             value={question}
             onChange={(event) => setQuestion(event.target.value)}
             onKeyDown={(event) => {
-              // Enter sends; Shift+Enter is a newline.
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
                 void submit(question);
