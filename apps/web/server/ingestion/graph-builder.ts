@@ -7,7 +7,7 @@ import type { UnifiedEvent } from '@kloyya/core';
  * Graph Builder — Transforms a UnifiedEvent into Graph Nodes and Edges.
  * 
  * Principles:
- * 1. Idempotent: Running the same event twice updates, doesn't duplicate (thanks to unique indexes).
+ * 1. Idempotent: Running the same event twice updates, doesn't duplicate.
  * 2. Tenant-scoped: All queries are strictly bound to organizationId and workspaceId.
  * 3. Relational: Automatically creates edges between the actor, the content, and references.
  */
@@ -120,7 +120,6 @@ async function upsertNode(input: {
   externalProvider: string;
   type: string;
   name: string;
-  // ✅ CORRECTION : Ajout de `| undefined` pour satisfaire exactOptionalPropertyTypes
   content?: string | undefined;
   metadata: Record<string, unknown>;
 }): Promise<string> {
@@ -142,7 +141,6 @@ async function upsertNode(input: {
       .update(graphNodes)
       .set({
         name: input.name,
-        // ✅ CORRECTION : Gestion propre de undefined pour ne pas écraser avec null/undefined
         content: input.content !== undefined ? input.content : graphNodes.content,
         metadata: input.metadata,
         updatedAt: new Date(),
@@ -167,6 +165,11 @@ async function upsertNode(input: {
       lastSeenAt: new Date(),
     })
     .returning({ id: graphNodes.id });
+
+  // ✅ CORRECTION : Vérification explicite pour satisfaire TypeScript strict
+  if (!newNode) {
+    throw new Error('Failed to insert graph node');
+  }
 
   return newNode.id;
 }
