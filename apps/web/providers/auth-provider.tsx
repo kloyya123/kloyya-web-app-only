@@ -25,7 +25,6 @@ interface AuthContextValue {
   updatePassword: (newPassword: string) => Promise<void>;
   completeOnboarding: (profile: OnboardingProfile) => Promise<Session>;
   updateSettings: (patch: SettingsPatch) => Promise<Session>;
-  // ✅ NOUVEAU
   signInWithGoogle: () => Promise<void>;
 }
 
@@ -42,7 +41,10 @@ export function AuthProvider({ children, initialSession }: AuthProviderProps) {
   const { data: session = null, isPending } = useQuery({
     queryKey: SESSION_KEY,
     queryFn: () => services.auth.getSession(),
-    initialData: initialSession,
+    // ✅ CORRECTION CRUCIALE : 
+    // Si initialSession est null, on passe 'undefined'. 
+    // Cela force TanStack Query à ignorer initialData et à lancer queryFn côté client.
+    initialData: initialSession || undefined,
     staleTime: Number.POSITIVE_INFINITY,
   });
 
@@ -75,13 +77,17 @@ export function AuthProvider({ children, initialSession }: AuthProviderProps) {
       updatePassword: (newPassword: string) => services.auth.updatePassword(newPassword),
       completeOnboarding: onboardingMutation.mutateAsync,
       updateSettings: settingsMutation.mutateAsync,
-      // ✅ NOUVEAU : Appel direct au service
       signInWithGoogle: () => services.auth.signInWithGoogle(),
     }),
     [
-      session, isPending, signInMutation.mutateAsync, signUpMutation.mutateAsync,
-      signOutMutation.mutateAsync, verifyEmailMutation.mutateAsync,
-      onboardingMutation.mutateAsync, settingsMutation.mutateAsync,
+      session,
+      isPending,
+      signInMutation.mutateAsync,
+      signUpMutation.mutateAsync,
+      signOutMutation.mutateAsync,
+      verifyEmailMutation.mutateAsync,
+      onboardingMutation.mutateAsync,
+      settingsMutation.mutateAsync,
     ],
   );
 
