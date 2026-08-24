@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
 import { db } from '@kloyya/db';
-import { memories, graphNodes } from '@kloyya/db/schema';
+import { memories, graphNodes, users } from '@kloyya/db/schema';
 import { eq, and, gte, desc, sql } from 'drizzle-orm';
 import type { GraphNode, Memory } from '@kloyya/db';
 import { 
@@ -10,17 +12,56 @@ import {
   type DecisionContext 
 } from '@/server/ai/decision-engine';
 
-// Types spécifiques pour éviter les casts 'any'
 type GraphNodeType = 'person' | 'project' | 'document' | 'meeting' | 'decision' | 'task' | 'conversation' | 'tool' | 'knowledge';
 type MemoryLayer = 'short_term' | 'working' | 'session' | 'long_term' | 'organizational' | 'knowledge' | 'decision' | 'conversational' | 'user';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { query, conversationId, userId, workspaceId, organizationId } = body;
+    let { query, conversationId, userId, workspaceId, organizationId } = body;
 
-    if (!query || !workspaceId || !organizationId) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    if (!query) {
+      return NextResponse.json({ error: 'Missing query in request body' }, { status: 400 });
+    }
+
+    // 🛡️ ROBUSTESSE : Si le frontend n'envoie pas les IDs, on les récupère depuis la session Supabase
+    if (!workspaceId || !organizationId) {
+      const cookieStore = await cookies();
+      const supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        {
+          cookies: {
+            getAll() { return cookieStore.getAll(); },
+            setAll() { /* Ignoré car on ne modifie pas les cookies ici */ }
+          }
+        }
+      );
+      
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        return NextResponse.json({ error: 'Unauthorized: No active session found' }, { status: 401 });
+      }
+
+      // Récupérer l'organisation et le workspace actif de l'utilisateur depuis la BDD
+      const [userRecord] = await db
+        .select({ 
+          organizationId: users.organizationId, 
+          activeWorkspaceId: users.activeWorkspaceId 
+        })
+        .from(users)
+        .where(eq(users.id, session.user.id))
+        .limit(1);
+
+      if (!userRecord || !userRecord.organizationId || !userRecord.activeWorkspaceId) {
+        return NextResponse.json({ 
+          error: 'User profile incomplete: missing organization or active workspace. Please complete onboarding.' 
+        }, { status: 400 });
+      }
+
+      workspaceId = userRecord.activeWorkspaceId;
+      organizationId = userRecord.organizationId;
+      userId = session.user.id;
     }
 
     const today = new Date();
@@ -41,7 +82,7 @@ export async function POST(request: NextRequest) {
       .orderBy(desc(memories.importance))
       .limit(10);
 
-    // 1b. Récupérer les nœuds récents (ex: les emails d'alerte que le briefing a vus)
+    // 1b. Récupérer les nœuds récents
     const recentNodesData = await db
       .select({ name: graphNodes.name, type: graphNodes.type, content: graphNodes.content })
       .from(graphNodes)
@@ -55,7 +96,7 @@ export async function POST(request: NextRequest) {
       .orderBy(desc(graphNodes.lastSeenAt))
       .limit(15);
 
-    // 2. Récupérer l'historique de conversation (Mémoire conversationnelle)
+    // 2. Récupérer l'historique de conversation
     const conversationHistory = await db
       .select({ content: memories.content })
       .from(memories)
@@ -72,10 +113,10 @@ export async function POST(request: NextRequest) {
 
     const historyText =
       conversationHistory.length > 0
-        ? 'Historique récent de la conversation :\n' + conversationHistory.map((m) => `- ${m.content}`).join('\n')
+        ? 'Historique récent :\n' + conversationHistory.map((m) => `- ${m.content}`).join('\n')
         : 'Aucun historique précédent.';
 
-    // 3. Mapper les données vers les types attendus par le Decision Engine (sans utiliser 'any')
+    // 3. Mapper les données
     const nodes: GraphNode[] = recentNodesData.map((n) => ({
       id: 'temp-id',
       workspaceId,
@@ -106,7 +147,7 @@ export async function POST(request: NextRequest) {
       userId: userId || 'unknown',
       workspaceId,
       organizationId,
-      query: `${historyText}\n\nNouvelle question de l'utilisateur : ${query}`,
+      query: `${historyText}\n\nNouvelle question : ${query}`,
       nodes,
       edges: [],
       memories: memoriesObj,
@@ -115,7 +156,7 @@ export async function POST(request: NextRequest) {
 
     const finalPrompt = buildDecisionPrompt(context);
 
-    // 4. Appel à l'API Perplexity (Sonar)
+    // 4. Appel à Perplexity (Sonar)
     const perplexityResponse = await fetch('https://api.perplexity.ai/chat/completions', {
       method: 'POST',
       headers: {
@@ -142,24 +183,23 @@ export async function POST(request: NextRequest) {
     const data = await perplexityResponse.json();
     const aiContent = data.choices[0].message.content;
 
-    // 5. Parser la réponse JSON (en gérant les éventuels blocs markdown ```json ... ```)
+    // 5. Parser la réponse JSON
     let parsedResponse;
     try {
       const jsonMatch = aiContent.match(/```json\s*([\s\S]*?)\s*```/);
       const jsonString = jsonMatch ? jsonMatch[1] : aiContent;
       parsedResponse = JSON.parse(jsonString);
     } catch {
-      console.error('[Ask API] Failed to parse Perplexity JSON response. Raw content:', aiContent);
-      // Fallback robuste en cas d'échec du parsing JSON
+      console.error('[Ask API] Failed to parse JSON. Raw content:', aiContent);
       parsedResponse = {
         summary: aiContent,
         recommendations: [],
         confidenceInAnalysis: 0.5,
-        missingInformation: ['La réponse de l\'IA n\'a pas pu être formatée en JSON structuré.'],
+        missingInformation: ['La réponse n\'a pas pu être formatée en JSON structuré.'],
       };
     }
 
-    // 6. Sauvegarder la mémoire conversationnelle (Pour ne pas oublier)
+    // 6. Sauvegarder la mémoire conversationnelle
     await db.insert(memories).values({
       workspaceId,
       organizationId,
