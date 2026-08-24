@@ -22,3 +22,6 @@ export * from './feedback.js';
 export * from './knowledge.js';
 export * from './search.js';
 export * from './sources.js';
+
+// ✅ AJOUT : Exporter le schéma universel d'événement pour l'ingestion
+export * from './unified-event.js';
