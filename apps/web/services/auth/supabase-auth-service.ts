@@ -138,7 +138,7 @@ export class SupabaseAuthService implements AuthService {
     if (error) {
       throw new ApiError({
         errorCode: 'oauth_failed',
-        httpStatus: API_STATUS.InternalServerError,
+        httpStatus: API_STATUS.InternalError,
         message: 'Échec de la connexion avec Google.',
         description: error.message,
         suggestedResolution: 'Veuillez réessayer ou utiliser votre email et mot de passe.',
