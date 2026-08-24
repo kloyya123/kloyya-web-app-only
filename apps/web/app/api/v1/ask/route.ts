@@ -19,14 +19,14 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     
-    // ✅ CORRECTION : 'const' pour ce qui ne change pas, 'let' pour ce qui sera réassigné
-    const { query, conversationId } = body;
+    // ✅ CORRECTION : Le frontend envoie "question", pas "query"
+    const { question, conversationId } = body;
     let userId = body.userId;
     let workspaceId = body.workspaceId;
     let organizationId = body.organizationId;
 
-    if (!query) {
-      return NextResponse.json({ error: 'Missing query in request body' }, { status: 400 });
+    if (!question || question.trim().length === 0) {
+      return NextResponse.json({ error: 'Missing question in request body' }, { status: 400 });
     }
 
     // 🛡️ ROBUSTESSE : Si le frontend n'envoie pas les IDs, on les récupère depuis la session Supabase
@@ -152,7 +152,7 @@ export async function POST(request: NextRequest) {
       userId: userId || 'unknown',
       workspaceId,
       organizationId,
-      query: `${historyText}\n\nNouvelle question : ${query}`,
+      query: `${historyText}\n\nNouvelle question : ${question}`,
       nodes,
       edges: [],
       memories: memoriesObj,
@@ -210,13 +210,24 @@ export async function POST(request: NextRequest) {
       organizationId,
       userId: userId || null,
       layer: 'conversational',
-      title: `Query: ${query.substring(0, 50)}...`,
-      content: `User: ${query}\nKloyya: ${parsedResponse.summary}`,
+      title: `Query: ${question.substring(0, 50)}...`,
+      content: `User: ${question}\nKloyya: ${parsedResponse.summary}`,
       metadata: { conversationId, timestamp: new Date().toISOString() },
       importance: 0.8,
     });
 
-    return NextResponse.json(parsedResponse, { status: 200 });
+    // 7. Formater la réponse pour correspondre au type AskAnswer attendu par le frontend
+    const formattedResponse = {
+      answer: parsedResponse.summary,
+      citations: (parsedResponse.recommendations || []).map((rec: any) => ({
+        source: rec.evidence?.[0]?.source || 'kloyya_analysis',
+        label: rec.recommendation,
+        freshness: new Date().toISOString(),
+      })),
+      usage: { remaining: 28 }, // Valeur par défaut, à remplacer par la vraie logique de quota si nécessaire
+    };
+
+    return NextResponse.json(formattedResponse, { status: 200 });
 
   } catch (error) {
     console.error('[Ask API] Critical Error:', error);
