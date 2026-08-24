@@ -1,20 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 import { db } from '@kloyya/db';
 import { memories, graphNodes } from '@kloyya/db/schema';
 import { eq, and, gte, desc, sql } from 'drizzle-orm';
-import { DECISION_ENGINE_SYSTEM_PROMPT, buildDecisionPrompt, type DecisionContext, type Recommendation } from '@/server/ai/decision-engine';
-// Remplace ce import par ton véritable client AI (ex: OpenAI, Perplexity, Anthropic)
-// import { generateObject } from 'ai'; 
-// import { openai } from '@ai-sdk/openai';
 
-/**
- * POST /api/v1/ask
- * 
- * Le véritable Moteur de Décision de Kloyya.
- * 1. Il cherche le contexte dans VOTRE base de données (pas le web public).
- * 2. Il inclut l'historique de la conversation.
- * 3. Il sauvegarde l'échange pour la mémoire future.
- */
+// TODO: Décommenter ces imports lors de l'intégration du véritable moteur d'IA
+// import { DECISION_ENGINE_SYSTEM_PROMPT, buildDecisionPrompt, type DecisionContext } from '@/server/ai/decision-engine';
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -24,9 +16,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // ÉTAPE 1 : Récupérer le contexte local (Ce que le Briefing a vu)
-    // ─────────────────────────────────────────────────────────────────────
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -59,89 +48,58 @@ export async function POST(request: NextRequest) {
       .orderBy(desc(graphNodes.lastSeenAt))
       .limit(15);
 
-    // ─────────────────────────────────────────────────────────────────────
-    // ÉTAPE 2 : Récupérer l'historique de conversation (Mémoire conversationnelle)
-    // ─────────────────────────────────────────────────────────────────────
+    // 2. Récupérer l'historique de conversation (Mémoire conversationnelle)
     const conversationHistory = await db
-      .select({ content: memories.content, layer: memories.layer })
+      .select({ content: memories.content })
       .from(memories)
       .where(
         and(
           eq(memories.workspaceId, workspaceId),
           eq(memories.organizationId, organizationId),
-          userId ? eq(memories.userId, userId) : sql`1=1`, // Fallback si userId non fourni
+          userId ? eq(memories.userId, userId) : sql`1=1`,
           eq(memories.layer, 'conversational')
         )
       )
       .orderBy(desc(memories.createdAt))
-      .limit(5); // Garder les 5 derniers échanges
+      .limit(5);
 
-    // Formater l'historique pour le prompt
-    const historyText = conversationHistory.length > 0 
-      ? "Historique récent de la conversation :\n" + conversationHistory.map(m => `- ${m.content}`).join('\n')
-      : "Aucun historique précédent.";
+    const historyText =
+      conversationHistory.length > 0
+        ? 'Historique récent de la conversation :\n' + conversationHistory.map((m) => `- ${m.content}`).join('\n')
+        : 'Aucun historique précédent.';
 
-    // ─────────────────────────────────────────────────────────────────────
-    // ÉTAPE 3 : Construire le contexte pour le Moteur de Décision
-    // ─────────────────────────────────────────────────────────────────────
-    const context: DecisionContext = {
-      userId: userId || 'unknown',
-      workspaceId,
-      organizationId,
-      query: `${historyText}\n\nNouvelle question de l'utilisateur : ${query}`,
-      nodes: recentNodes.map(n => ({ ...n, id: 'mock-id', metadata: {}, createdAt: new Date(), updatedAt: new Date() } as any)), // Adapt to your exact GraphNode type
-      edges: [], // À implémenter si tu veux les relations spécifiques
-      memories: recentMemories.map(m => ({ ...m, id: 'mock-id', metadata: {}, importance: 1, accessCount: 0, createdAt: new Date(), updatedAt: new Date() } as any)), // Adapt to Memory type
-      currentTime: new Date().toISOString(),
-    };
+    // TODO: Construire le prompt final en utilisant recentMemories, recentNodes et historyText
+    // const context: DecisionContext = { ... };
+    // const finalPrompt = buildDecisionPrompt(context);
 
-    const finalPrompt = buildDecisionPrompt(context);
-
-    // ─────────────────────────────────────────────────────────────────────
-    // ÉTAPE 4 : Appel à l'IA (Remplace par ton vrai appel AI ici)
-    // ─────────────────────────────────────────────────────────────────────
-    /* 
-    const { object } = await generateObject({
-      model: openai('gpt-4o'), // ou perplexity, anthropic, etc.
-      system: DECISION_ENGINE_SYSTEM_PROMPT,
-      prompt: finalPrompt,
-      schema: z.object({
-        recommendations: z.array(z.any()), // Remplace par ton schéma Zod strict de Recommendation
-        summary: z.string(),
-        confidenceInAnalysis: z.number(),
-        missingInformation: z.array(z.string()),
-      }),
-    });
-    const aiResponse = object;
-    */
-   
-    // MOCK DE RÉPONSE pour tester la logique sans l'IA pour l'instant
+    // MOCK DE RÉPONSE pour tester la logique de mémoire et de contexte sans l'IA active
+    // Ce mock simule ce que l'IA répondrait après avoir analysé les données ci-dessus.
     const aiResponse = {
       summary: `J'ai analysé tes outils connectés. Aujourd'hui, l'élément le plus important concerne ta sécurité numérique : tu as reçu 3 alertes de sécurité Google et 2 notifications Apple (validation d'email et connexion iCloud) entre 11h04 et 12h31 GMT. Je te recommande de vérifier ces activités immédiatement.`,
-      recommendations: [{
-        recommendation: "Vérifie les alertes de sécurité Google et Apple.",
-        confidenceScore: 0.95,
-        businessImpact: "HIGH",
-        priority: "P1",
-        urgency: "IMMEDIATE",
-        evidence: [
-          { description: "3 emails 'Alerte de sécurité' Google reçus aujourd'hui.", source: "gmail", strength: 0.9 },
-          { description: "2 notifications Apple (validation et connexion iPhone).", source: "gmail", strength: 0.9 }
-        ],
-        reasoning: "Des alertes de sécurité multiples sur une courte période indiquent un risque potentiel de compromission de compte.",
-        reasoningChain: [{ step: 1, observation: "Alertes Google et Apple détectées", inference: "Risque de sécurité actif" }],
-        dependencies: [],
-        risks: [{ description: "Accès non autorisé aux comptes", likelihood: "MEDIUM", mitigation: "Changer les mots de passe et activer la 2FA" }],
-        expectedOutcome: "Sécurisation des comptes et paix d'esprit.",
-        relatedNodes: []
-      }],
+      recommendations: [
+        {
+          recommendation: 'Vérifie les alertes de sécurité Google et Apple.',
+          confidenceScore: 0.95,
+          businessImpact: 'HIGH',
+          priority: 'P1',
+          urgency: 'IMMEDIATE',
+          evidence: [
+            { description: "3 emails 'Alerte de sécurité' Google reçus aujourd'hui.", source: 'gmail', strength: 0.9 },
+            { description: '2 notifications Apple (validation et connexion iPhone).', source: 'gmail', strength: 0.9 },
+          ],
+          reasoning: "Des alertes de sécurité multiples sur une courte période indiquent un risque potentiel de compromission de compte.",
+          reasoningChain: [{ step: 1, observation: 'Alertes Google et Apple détectées', inference: 'Risque de sécurité actif' }],
+          dependencies: [],
+          risks: [{ description: 'Accès non autorisé aux comptes', likelihood: 'MEDIUM', mitigation: 'Changer les mots de passe et activer la 2FA' }],
+          expectedOutcome: 'Sécurisation des comptes et paix d’esprit.',
+          relatedNodes: [],
+        },
+      ],
       confidenceInAnalysis: 0.95,
-      missingInformation: []
+      missingInformation: [],
     };
 
-    // ─────────────────────────────────────────────────────────────────────
-    // ÉTAPE 5 : Sauvegarder la mémoire conversationnelle (Pour ne pas oublier)
-    // ─────────────────────────────────────────────────────────────────────
+    // 5. Sauvegarder la mémoire conversationnelle (Pour ne pas oublier)
     await db.insert(memories).values({
       workspaceId,
       organizationId,
@@ -154,7 +112,6 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json(aiResponse, { status: 200 });
-
   } catch (error) {
     console.error('[Ask API] Error:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
