@@ -23,5 +23,5 @@ export * from './knowledge.js';
 export * from './search.js';
 export * from './sources.js';
 
-// ✅ AJOUT : Exporter le schéma universel d'événement pour l'ingestion
+// ✅ CETTE LIGNE EST OBLIGATOIRE POUR QUE LE BUILD PASSE :
 export * from './unified-event.js';
