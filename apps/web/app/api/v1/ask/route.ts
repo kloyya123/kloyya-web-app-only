@@ -15,11 +15,15 @@ import {
 type GraphNodeType = 'person' | 'project' | 'document' | 'meeting' | 'decision' | 'task' | 'conversation' | 'tool' | 'knowledge';
 type MemoryLayer = 'short_term' | 'working' | 'session' | 'long_term' | 'organizational' | 'knowledge' | 'decision' | 'conversational' | 'user';
 
+interface ParsedRecommendation {
+  recommendation?: string;
+  evidence?: Array<{ source?: string }>;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     
-    // ✅ CORRECTION : Le frontend envoie "question", pas "query"
     const { question, conversationId } = body;
     let userId = body.userId;
     let workspaceId = body.workspaceId;
@@ -29,7 +33,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing question in request body' }, { status: 400 });
     }
 
-    // 🛡️ ROBUSTESSE : Si le frontend n'envoie pas les IDs, on les récupère depuis la session Supabase
     if (!workspaceId || !organizationId) {
       const cookieStore = await cookies();
       const supabase = createServerClient(
@@ -38,7 +41,7 @@ export async function POST(request: NextRequest) {
         {
           cookies: {
             getAll() { return cookieStore.getAll(); },
-            setAll() { /* Ignoré car on ne modifie pas les cookies ici */ }
+            setAll() {}
           }
         }
       );
@@ -48,7 +51,6 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Unauthorized: No active session found' }, { status: 401 });
       }
 
-      // Récupérer l'organisation et le workspace actif de l'utilisateur depuis la BDD
       const [userRecord] = await db
         .select({ 
           organizationId: users.organizationId, 
@@ -72,7 +74,6 @@ export async function POST(request: NextRequest) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // 1a. Récupérer les mémoires à court terme et de travail d'aujourd'hui
     const recentMemoriesData = await db
       .select({ title: memories.title, content: memories.content, layer: memories.layer })
       .from(memories)
@@ -87,7 +88,6 @@ export async function POST(request: NextRequest) {
       .orderBy(desc(memories.importance))
       .limit(10);
 
-    // 1b. Récupérer les nœuds récents
     const recentNodesData = await db
       .select({ name: graphNodes.name, type: graphNodes.type, content: graphNodes.content })
       .from(graphNodes)
@@ -101,7 +101,6 @@ export async function POST(request: NextRequest) {
       .orderBy(desc(graphNodes.lastSeenAt))
       .limit(15);
 
-    // 2. Récupérer l'historique de conversation
     const conversationHistory = await db
       .select({ content: memories.content })
       .from(memories)
@@ -121,7 +120,6 @@ export async function POST(request: NextRequest) {
         ? 'Historique récent :\n' + conversationHistory.map((m) => `- ${m.content}`).join('\n')
         : 'Aucun historique précédent.';
 
-    // 3. Mapper les données
     const nodes: GraphNode[] = recentNodesData.map((n) => ({
       id: 'temp-id',
       workspaceId,
@@ -161,7 +159,6 @@ export async function POST(request: NextRequest) {
 
     const finalPrompt = buildDecisionPrompt(context);
 
-    // 4. Appel à Perplexity (Sonar)
     const perplexityResponse = await fetch('https://api.perplexity.ai/chat/completions', {
       method: 'POST',
       headers: {
@@ -188,8 +185,7 @@ export async function POST(request: NextRequest) {
     const data = await perplexityResponse.json();
     const aiContent = data.choices[0].message.content;
 
-    // 5. Parser la réponse JSON
-    let parsedResponse;
+    let parsedResponse: { summary: string; recommendations?: ParsedRecommendation[] };
     try {
       const jsonMatch = aiContent.match(/```json\s*([\s\S]*?)\s*```/);
       const jsonString = jsonMatch ? jsonMatch[1] : aiContent;
@@ -199,12 +195,9 @@ export async function POST(request: NextRequest) {
       parsedResponse = {
         summary: aiContent,
         recommendations: [],
-        confidenceInAnalysis: 0.5,
-        missingInformation: ['La réponse n\'a pas pu être formatée en JSON structuré.'],
       };
     }
 
-    // 6. Sauvegarder la mémoire conversationnelle
     await db.insert(memories).values({
       workspaceId,
       organizationId,
@@ -216,15 +209,14 @@ export async function POST(request: NextRequest) {
       importance: 0.8,
     });
 
-    // 7. Formater la réponse pour correspondre au type AskAnswer attendu par le frontend
     const formattedResponse = {
       answer: parsedResponse.summary,
-      citations: (parsedResponse.recommendations || []).map((rec: any) => ({
+      citations: (parsedResponse.recommendations || []).map((rec: ParsedRecommendation) => ({
         source: rec.evidence?.[0]?.source || 'kloyya_analysis',
-        label: rec.recommendation,
+        label: rec.recommendation || 'Recommandation',
         freshness: new Date().toISOString(),
       })),
-      usage: { remaining: 28 }, // Valeur par défaut, à remplacer par la vraie logique de quota si nécessaire
+      usage: { remaining: 28 },
     };
 
     return NextResponse.json(formattedResponse, { status: 200 });
