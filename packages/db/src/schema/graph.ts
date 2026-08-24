@@ -132,3 +132,4 @@ export const graphEdgesRelations = relations(graphEdges, ({ one }) => ({
     relationName: 'targetEdges',
   }),
 }));
+export * from './graph';
