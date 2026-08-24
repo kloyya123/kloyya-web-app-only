@@ -18,7 +18,12 @@ type MemoryLayer = 'short_term' | 'working' | 'session' | 'long_term' | 'organiz
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    let { query, conversationId, userId, workspaceId, organizationId } = body;
+    
+    // ✅ CORRECTION : 'const' pour ce qui ne change pas, 'let' pour ce qui sera réassigné
+    const { query, conversationId } = body;
+    let userId = body.userId;
+    let workspaceId = body.workspaceId;
+    let organizationId = body.organizationId;
 
     if (!query) {
       return NextResponse.json({ error: 'Missing query in request body' }, { status: 400 });
