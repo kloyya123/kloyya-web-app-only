@@ -42,6 +42,9 @@ const PUBLIC_ROUTES = [
   // The password-recovery email link lands here before any session exists —
   // see app/auth/confirm/route.ts, which is what actually establishes one.
   '/auth/confirm',
+  // ✅ AJOUT CRUCIAL : Autorise le middleware à laisser passer le callback OAuth
+  // pour que la session puisse être établie avant toute vérification d'authentification.
+  '/auth/callback',
 ];
 /** Reachable while authenticated but not yet fully provisioned. */
 const PROVISIONING_ROUTES = ['/verify-email', '/onboarding', '/workspace-init'];
