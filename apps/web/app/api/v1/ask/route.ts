@@ -33,7 +33,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing question in request body' }, { status: 400 });
     }
 
-    if (!workspaceId || !organizationId) {
+    // 🛡️ ROBUSTESSE : Récupération sécurisée de l'utilisateur via getUser()
+    if (!workspaceId || !organizationId || !userId) {
       const cookieStore = await cookies();
       const supabase = createServerClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -46,8 +47,10 @@ export async function POST(request: NextRequest) {
         }
       );
       
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) {
+      // ✅ CORRECTION : Utilisation de getUser() au lieu de getSession() pour valider le JWT côté serveur
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      
+      if (userError || !user) {
         return NextResponse.json({ error: 'Unauthorized: No active session found' }, { status: 401 });
       }
 
@@ -57,7 +60,7 @@ export async function POST(request: NextRequest) {
           activeWorkspaceId: users.activeWorkspaceId 
         })
         .from(users)
-        .where(eq(users.id, session.user.id))
+        .where(eq(users.id, user.id))
         .limit(1);
 
       if (!userRecord || !userRecord.organizationId || !userRecord.activeWorkspaceId) {
@@ -68,7 +71,7 @@ export async function POST(request: NextRequest) {
 
       workspaceId = userRecord.activeWorkspaceId;
       organizationId = userRecord.organizationId;
-      userId = session.user.id;
+      userId = user.id;
     }
 
     const today = new Date();
