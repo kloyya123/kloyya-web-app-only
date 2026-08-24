@@ -10,6 +10,10 @@ import {
   type DecisionContext 
 } from '@/server/ai/decision-engine';
 
+// Types spécifiques pour éviter les casts 'any'
+type GraphNodeType = 'person' | 'project' | 'document' | 'meeting' | 'decision' | 'task' | 'conversation' | 'tool' | 'knowledge';
+type MemoryLayer = 'short_term' | 'working' | 'session' | 'long_term' | 'organizational' | 'knowledge' | 'decision' | 'conversational' | 'user';
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -71,24 +75,24 @@ export async function POST(request: NextRequest) {
         ? 'Historique récent de la conversation :\n' + conversationHistory.map((m) => `- ${m.content}`).join('\n')
         : 'Aucun historique précédent.';
 
-    // 3. Mapper les données vers les types attendus par le Decision Engine
+    // 3. Mapper les données vers les types attendus par le Decision Engine (sans utiliser 'any')
     const nodes: GraphNode[] = recentNodesData.map((n) => ({
       id: 'temp-id',
       workspaceId,
       organizationId,
-      type: n.type as any,
+      type: n.type as GraphNodeType,
       name: n.name || 'Unknown',
       content: n.content || '',
       metadata: {},
       createdAt: new Date(),
       updatedAt: new Date(),
-    } as unknown as GraphNode));
+    } as GraphNode));
 
     const memoriesObj: Memory[] = recentMemoriesData.map((m) => ({
       id: 'temp-id',
       workspaceId,
       organizationId,
-      layer: m.layer as any,
+      layer: m.layer as MemoryLayer,
       title: m.title || 'Unknown',
       content: m.content || '',
       metadata: {},
@@ -96,7 +100,7 @@ export async function POST(request: NextRequest) {
       accessCount: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
-    } as unknown as Memory));
+    } as Memory));
 
     const context: DecisionContext = {
       userId: userId || 'unknown',
@@ -119,12 +123,12 @@ export async function POST(request: NextRequest) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'sonar', // Modèle Sonar de Perplexity
+        model: 'sonar',
         messages: [
           { role: 'system', content: DECISION_ENGINE_SYSTEM_PROMPT },
           { role: 'user', content: finalPrompt }
         ],
-        temperature: 0.2, // Bas pour un moteur de décision factuel
+        temperature: 0.2,
         max_tokens: 1500,
       }),
     });
@@ -144,7 +148,7 @@ export async function POST(request: NextRequest) {
       const jsonMatch = aiContent.match(/```json\s*([\s\S]*?)\s*```/);
       const jsonString = jsonMatch ? jsonMatch[1] : aiContent;
       parsedResponse = JSON.parse(jsonString);
-    } catch (e) {
+    } catch {
       console.error('[Ask API] Failed to parse Perplexity JSON response. Raw content:', aiContent);
       // Fallback robuste en cas d'échec du parsing JSON
       parsedResponse = {
