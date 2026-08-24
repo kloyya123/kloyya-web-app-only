@@ -4,9 +4,6 @@ import { db } from '@kloyya/db';
 import { memories, graphNodes } from '@kloyya/db/schema';
 import { eq, and, gte, desc, sql } from 'drizzle-orm';
 
-// TODO: Décommenter ces imports lors de l'intégration du véritable moteur d'IA
-// import { DECISION_ENGINE_SYSTEM_PROMPT, buildDecisionPrompt, type DecisionContext } from '@/server/ai/decision-engine';
-
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -20,7 +17,8 @@ export async function POST(request: NextRequest) {
     today.setHours(0, 0, 0, 0);
 
     // 1a. Récupérer les mémoires à court terme et de travail d'aujourd'hui
-    const recentMemories = await db
+    // Préfixé par _ car utilisé dans la future intégration IA
+    const _recentMemories = await db
       .select({ title: memories.title, content: memories.content, layer: memories.layer })
       .from(memories)
       .where(
@@ -35,7 +33,8 @@ export async function POST(request: NextRequest) {
       .limit(10);
 
     // 1b. Récupérer les nœuds récents (ex: les emails d'alerte que le briefing a vus)
-    const recentNodes = await db
+    // Préfixé par _ car utilisé dans la future intégration IA
+    const _recentNodes = await db
       .select({ name: graphNodes.name, type: graphNodes.type, content: graphNodes.content })
       .from(graphNodes)
       .where(
@@ -63,12 +62,13 @@ export async function POST(request: NextRequest) {
       .orderBy(desc(memories.createdAt))
       .limit(5);
 
-    const historyText =
+    // Préfixé par _ car utilisé dans la future intégration IA
+    const _historyText =
       conversationHistory.length > 0
         ? 'Historique récent de la conversation :\n' + conversationHistory.map((m) => `- ${m.content}`).join('\n')
         : 'Aucun historique précédent.';
 
-    // TODO: Construire le prompt final en utilisant recentMemories, recentNodes et historyText
+    // TODO: Construire le prompt final en utilisant _recentMemories, _recentNodes et _historyText
     // const context: DecisionContext = { ... };
     // const finalPrompt = buildDecisionPrompt(context);
 
