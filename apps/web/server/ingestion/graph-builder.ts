@@ -1,20 +1,20 @@
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { db } from '@kloyya/db';
 import { graphNodes, graphEdges } from '@kloyya/db/schema';
-import type { UnifiedEvent, UnifiedActor, UnifiedReference } from '@kloyya/core';
+import type { UnifiedEvent } from '@kloyya/core';
 
 /**
  * Graph Builder — Transforms a UnifiedEvent into Graph Nodes and Edges.
  * 
  * Principles:
- * 1. Idempotent: Running the same event twice updates, doesn't duplicate.
+ * 1. Idempotent: Running the same event twice updates, doesn't duplicate (thanks to unique indexes).
  * 2. Tenant-scoped: All queries are strictly bound to organizationId and workspaceId.
  * 3. Relational: Automatically creates edges between the actor, the content, and references.
  */
 
 export async function ingestEventToGraph(event: UnifiedEvent): Promise<void> {
   // 1. Upsert the Actor (Person)
-  await upsertNode({
+  const actorNodeId = await upsertNode({
     organizationId: event.organizationId,
     workspaceId: event.workspaceId,
     externalId: event.actor.externalId || event.actor.id,
@@ -43,12 +43,17 @@ export async function ingestEventToGraph(event: UnifiedEvent): Promise<void> {
     },
   });
 
-  // 3. Create Edge: Actor -> AUTHORED/PARTICIPATES_IN -> Event
-  if (event.actor.externalId || event.actor.id) {
-    // We need the actor's internal node ID. For simplicity, we assume the actor's 
-    // externalId is unique enough to query, or we can store it in metadata.
-    // A more robust way is to return the ID from upsertNode (implemented below).
-  }
+  // 3. Create Edge: Actor -> AUTHORED -> Event
+  await upsertEdge({
+    organizationId: event.organizationId,
+    workspaceId: event.workspaceId,
+    sourceId: actorNodeId,
+    targetId: eventNodeId,
+    type: 'AUTHORED',
+    metadata: { role: 'author', timestamp: event.timestamp },
+    sourceProvider: event.provider,
+    sourceEventId: event.externalId,
+  });
 
   // 4. Upsert References and create Edges
   for (const ref of event.references) {
@@ -57,13 +62,12 @@ export async function ingestEventToGraph(event: UnifiedEvent): Promise<void> {
       workspaceId: event.workspaceId,
       externalId: ref.externalId || ref.name,
       externalProvider: ref.type === 'url' ? 'web' : event.provider,
-      type: ref.type as any, // Cast to graphNodeTypeEnum values
+      type: ref.type,
       name: ref.name,
       content: ref.context,
-      metadata: { url: ref.url },
+      metadata: { url: ref.url, ...(ref.metadata || {}) },
     });
 
-    // Create Edge: Event -> MENTIONS/REFERENCES -> Reference
     await upsertEdge({
       organizationId: event.organizationId,
       workspaceId: event.workspaceId,
@@ -76,8 +80,10 @@ export async function ingestEventToGraph(event: UnifiedEvent): Promise<void> {
     });
   }
 
-  // 5. Create Edges for Participants
+  // 5. Create Edges for other Participants
   for (const participant of event.participants) {
+    if (participant.actor.id === event.actor.id) continue;
+
     const participantNodeId = await upsertNode({
       organizationId: event.organizationId,
       workspaceId: event.workspaceId,
@@ -95,7 +101,7 @@ export async function ingestEventToGraph(event: UnifiedEvent): Promise<void> {
       workspaceId: event.workspaceId,
       sourceId: participantNodeId,
       targetId: eventNodeId,
-      type: edgeType as any,
+      type: edgeType,
       metadata: { role: participant.role, participatedAt: participant.participatedAt },
       sourceProvider: event.provider,
       sourceEventId: event.externalId,
@@ -114,7 +120,8 @@ async function upsertNode(input: {
   externalProvider: string;
   type: string;
   name: string;
-  content?: string;
+  // ✅ CORRECTION : Ajout de `| undefined` pour satisfaire exactOptionalPropertyTypes
+  content?: string | undefined;
   metadata: Record<string, unknown>;
 }): Promise<string> {
   const [existing] = await db
@@ -131,12 +138,12 @@ async function upsertNode(input: {
     .limit(1);
 
   if (existing) {
-    // Update existing node (e.g., update content, metadata, lastSeenAt)
     await db
       .update(graphNodes)
       .set({
         name: input.name,
-        content: input.content || existing.content, // Keep old content if new is empty
+        // ✅ CORRECTION : Gestion propre de undefined pour ne pas écraser avec null/undefined
+        content: input.content !== undefined ? input.content : graphNodes.content,
         metadata: input.metadata,
         updatedAt: new Date(),
         lastSeenAt: new Date(),
@@ -146,7 +153,6 @@ async function upsertNode(input: {
     return existing.id;
   }
 
-  // Insert new node
   const [newNode] = await db
     .insert(graphNodes)
     .values({
