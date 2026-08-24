@@ -1,6 +1,5 @@
 import { mockOrganization, mockUser, mockWorkspace } from '@/mock/organization';
 import { API_STATUS } from '@/types/api';
-import type { User } from '@/types/domain';
 import { mockError, mockRespond } from '../http/mock-transport';
 import { clearSession, readSession, writeSession } from './session-store';
 import { DEFAULT_PREFERENCES } from './types';
