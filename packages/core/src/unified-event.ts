@@ -243,12 +243,13 @@ export interface SyncResult {
   /** When to sync next (ISO 8601 timestamp) */
   nextSyncAt: string;
   /** Cursor for pagination (if provider supports it) */
-  cursor?: string;
+  // ✅ CORRECTION : Ajout de `| undefined` pour satisfaire exactOptionalPropertyTypes
+  cursor?: string | undefined;
   /** Error details */
   errorDetails?: Array<{
     externalId: string;
     error: string;
-  }>;
+  }> | undefined;
 }
 
 export interface Connector {
@@ -357,7 +358,7 @@ export class SlackConnector implements Connector {
         eventsSkipped: 0,
         errors: 0,
         nextSyncAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutes
-        cursor,
+        cursor, // Now valid because cursor?: string | undefined in SyncResult
       },
     };
   }
