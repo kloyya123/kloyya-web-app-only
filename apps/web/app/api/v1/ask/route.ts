@@ -201,7 +201,7 @@ export async function POST(request: NextRequest) {
       };
     }
 
-    await db.insert(memories).values({
+        await db.insert(memories).values({
       workspaceId,
       organizationId,
       userId: userId || null,
@@ -209,7 +209,7 @@ export async function POST(request: NextRequest) {
       title: `Query: ${question.substring(0, 50)}...`,
       content: `User: ${question}\nKloyya: ${parsedResponse.summary}`,
       metadata: { conversationId, timestamp: new Date().toISOString() },
-      importance: 0.8,
+      importance: 80, // ✅ CORRECTION : Nombre entier attendu par la BDD
     });
 
     const formattedResponse = {
