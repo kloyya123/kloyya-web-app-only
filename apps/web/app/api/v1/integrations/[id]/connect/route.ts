@@ -55,7 +55,8 @@ export async function POST(
     }
 
     // 3. Demander à Composio d'initier la connexion
-    const connectionRequest = await composio.client.connectedAccounts.initiate({
+    // ✅ CORRECTION : appel direct à connectedAccounts sur l'instance composio
+    const connectionRequest = await composio.connectedAccounts.initiate({
       appName: appName,
       entityId: user.id, // L'ID de l'utilisateur dans ton système (Supabase)
     });
