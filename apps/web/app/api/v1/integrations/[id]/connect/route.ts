@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
-import { composio } from '@/server/integrations/composio-client';
+import { getComposioClient } from '@/server/integrations/composio-client';
 import { db } from '@kloyya/db';
 import { users } from '@kloyya/db/schema';
 import { eq } from 'drizzle-orm';
@@ -54,8 +54,9 @@ export async function POST(
       return NextResponse.json({ error: 'User profile incomplete' }, { status: 400 });
     }
 
-    // 3. Demander à Composio d'initier la connexion
-    // ✅ CORRECTION : appel direct à connectedAccounts sur l'instance composio
+    // 3. ✅ Initialiser le client AU MOMENT DE L'EXÉCUTION (pas au build)
+    const composio = getComposioClient();
+
     const connectionRequest = await composio.connectedAccounts.initiate({
       appName: appName,
       entityId: user.id, // L'ID de l'utilisateur dans ton système (Supabase)
