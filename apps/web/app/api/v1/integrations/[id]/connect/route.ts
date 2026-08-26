@@ -7,10 +7,6 @@ import { db } from '@kloyya/db';
 import { users } from '@kloyya/db/schema';
 import { eq } from 'drizzle-orm';
 
-/**
- * POST /api/v1/integrations/[id]/connect
- * Initie le flux OAuth via Composio pour un outil donné.
- */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -55,9 +51,7 @@ export async function POST(
     }
 
     const composio = getComposioClient();
-    
-    // ✅ CORRECTION CRITIQUE : Composio attend les noms d'app en MAJUSCULES
-    const formattedAppName = appName.toUpperCase();
+    const formattedAppName = appName.toUpperCase(); // Composio attend les noms en majuscules
     
     const connectionRequest = await composio.connectedAccounts.initiate({
       appName: formattedAppName,
