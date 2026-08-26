@@ -5,7 +5,9 @@ export default function ConnectionsPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-heading-l text-foreground font-semibold">Connexions</h1>
-      <p className="text-body text-muted-foreground">Connectez vos outils pour alimenter l'intelligence de Kloyya.</p>
+      <p className="text-body text-muted-foreground">
+        Connectez vos outils pour alimenter l&apos;intelligence de Kloyya.
+      </p>
       
       <div className="space-y-4">
         <IntegrationCard 
