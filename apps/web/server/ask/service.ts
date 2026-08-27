@@ -1,67 +1,180 @@
-import { eq, and, gte, desc, sql } from 'drizzle-orm';
-import { db } from '@kloyya/db';
-import { connections, graphNodes, memories } from '@kloyya/db/schema';
+import { and, desc, eq, gte, or, sql } from 'drizzle-orm';
+import { connections, graphNodes, memories, syncRecords } from '@kloyya/db/schema';
 import type { AiProvider } from '@server/ai/provider';
+import { stripFootnoteMarkers } from '@server/ai/provider';
+
+const MAX_RECORDS = 24;
+const MAX_RECORD_CHARS = 3500;
+
+function questionTerms(question: string): string[] {
+  return [...new Set(
+    question
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .split(/[^a-z0-9@._-]+/)
+      .filter((word) => word.length >= 4),
+  )].slice(0, 8);
+}
+
+function payloadText(payload: unknown): string {
+  if (typeof payload === 'string') return payload;
+  try {
+    return JSON.stringify(payload);
+  } catch {
+    return '';
+  }
+}
+
+function extractJson(text: string): Record<string, unknown> | null {
+  const cleaned = stripFootnoteMarkers(text)
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start < 0 || end <= start) return null;
+
+  try {
+    const parsed = JSON.parse(cleaned.slice(start, end + 1));
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function arrayOfStrings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function isExternalQuestion(question: string): boolean {
+  return /\b(latest|today|news|actualité|actualite|march[eé]|market|competitor|concurrent|trend|2026|cette semaine|aujourd'hui|aujourd’hui)\b/i.test(
+    question,
+  );
+}
 
 /**
- * LE CŒUR DU CHEF DE CABINET : Service "ask" réécrit pour l'orchestration.
- * Il lit les données internes AVANT de faire appel au LLM.
+ * Ask Kloyya reads the connected workspace first.
+ *
+ * The important part is syncRecords: these are the records imported from the
+ * connected providers. Memories/graph are useful secondary context, but they
+ * must not be the only source used by Ask.
  */
 export async function ask(
-  dbInstance: any, // Type Drizzle DB
-  start: any,      // StartContext (évite les erreurs d'import de chemin)
+  dbInstance: any,
+  start: any,
   question: string,
-  provider: AiProvider | null, // ✅ CORRECTION : Accepter null si non configuré
+  provider: AiProvider | null,
   _context: any,
-  webSearch: any
+  _webSearch: any,
 ) {
-  // ✅ CORRECTION : Gérer le cas où aucun fournisseur d'IA n'est configuré
   if (!provider) {
-    return {
-      ok: false,
-      reason: 'not_configured',
-    };
+    return { ok: false as const, reason: 'not_configured' as const };
   }
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
   try {
-    // ─────────────────────────────────────────────────────────────────────
-    // ÉTAPE 1 : TOOL REGISTRY (Quels outils sont réellement connectés ?)
-    // ─────────────────────────────────────────────────────────────────────
     const connectedTools = await dbInstance
-      .select({ integrationId: connections.integrationId, status: connections.status })
+      .select({
+        integrationId: connections.integrationId,
+        status: connections.status,
+      })
       .from(connections)
       .where(
         and(
           eq(connections.workspaceId, start.activeWorkspaceId),
-          eq(connections.organizationId, start.organizationId)
-        )
+          eq(connections.organizationId, start.organizationId),
+        ),
       );
 
-    const availableTools = connectedTools
-      .filter((t: any) => t.status === 'connected')
-      .map((t: any) => t.integrationId)
-      .join(', ');
+    const connected = connectedTools
+      .filter((tool: { status: string }) => tool.status === 'connected')
+      .map((tool: { integrationId: string }) => tool.integrationId);
 
-    // ─────────────────────────────────────────────────────────────────────
-    // ÉTAPE 2 : EVIDENCE ENGINE (Lire les preuves internes AVANT de répondre)
-    // ─────────────────────────────────────────────────────────────────────
+    const terms = questionTerms(question);
+
+    const tenantConditions = [
+      eq(syncRecords.workspaceId, start.activeWorkspaceId),
+      eq(syncRecords.organizationId, start.organizationId),
+      gte(syncRecords.fetchedAt, today),
+    ];
+
+    const keywordConditions = terms.map(
+      (term) => sql`${syncRecords.payload}::text ILIKE ${`%${term}%`}`,
+    );
+
+    let records = keywordConditions.length
+      ? await dbInstance
+          .select({
+            integrationId: connections.integrationId,
+            resourceType: syncRecords.resourceType,
+            externalId: syncRecords.externalId,
+            payload: syncRecords.payload,
+            fetchedAt: syncRecords.fetchedAt,
+          })
+          .from(syncRecords)
+          .innerJoin(connections, eq(syncRecords.connectionId, connections.id))
+          .where(
+            and(
+              ...tenantConditions,
+              eq(connections.status, 'connected'),
+              or(...keywordConditions),
+            ),
+          )
+          .orderBy(desc(syncRecords.fetchedAt))
+          .limit(MAX_RECORDS)
+      : [];
+
+    if (records.length === 0) {
+      records = await dbInstance
+        .select({
+          integrationId: connections.integrationId,
+          resourceType: syncRecords.resourceType,
+          externalId: syncRecords.externalId,
+          payload: syncRecords.payload,
+          fetchedAt: syncRecords.fetchedAt,
+        })
+        .from(syncRecords)
+        .innerJoin(connections, eq(syncRecords.connectionId, connections.id))
+        .where(
+          and(
+            ...tenantConditions,
+            eq(connections.status, 'connected'),
+          ),
+        )
+        .orderBy(desc(syncRecords.fetchedAt))
+        .limit(MAX_RECORDS);
+    }
+
+    const syncEvidence = records.map((record: any) => {
+      const raw = payloadText(record.payload);
+      return {
+        source: record.integrationId,
+        type: record.resourceType,
+        externalId: record.externalId,
+        fetchedAt: record.fetchedAt,
+        content: raw.slice(0, MAX_RECORD_CHARS),
+      };
+    });
+
     const internalMemories = await dbInstance
-      .select({ 
+      .select({
         type: sql<string>`'memory'`,
         content: memories.content,
         source: memories.layer,
-        timestamp: memories.createdAt
+        timestamp: memories.createdAt,
       })
       .from(memories)
       .where(
         and(
           eq(memories.workspaceId, start.activeWorkspaceId),
           eq(memories.organizationId, start.organizationId),
-          gte(memories.createdAt, today)
-        )
+          gte(memories.createdAt, today),
+        ),
       )
       .orderBy(desc(memories.importance))
       .limit(5);
@@ -71,113 +184,120 @@ export async function ask(
         type: sql<string>`'graph'`,
         content: graphNodes.content,
         source: graphNodes.type,
-        timestamp: graphNodes.lastSeenAt
+        timestamp: graphNodes.lastSeenAt,
       })
       .from(graphNodes)
       .where(
         and(
           eq(graphNodes.workspaceId, start.activeWorkspaceId),
           eq(graphNodes.organizationId, start.organizationId),
-          gte(graphNodes.lastSeenAt, today)
-        )
+          gte(graphNodes.lastSeenAt, today),
+        ),
       )
       .orderBy(desc(graphNodes.lastSeenAt))
       .limit(5);
 
-    const allEvidence = [...internalMemories, ...internalGraph];
-    
-    const evidenceText = allEvidence.length > 0
-      ? allEvidence.map((e: any) => `[${e.source.toUpperCase()}] ${e.content}`).join('\n')
-      : 'Aucune donnée interne récente trouvée dans les outils connectés.';
+    const evidenceText = [
+      ...syncEvidence.map(
+        (item: any) =>
+          `[CONNECTED:${item.source}/${item.type}] ${item.content}`,
+      ),
+      ...internalMemories.map(
+        (item: any) => `[MEMORY:${item.source}] ${item.content}`,
+      ),
+      ...internalGraph.map(
+        (item: any) => `[GRAPH:${item.source}] ${item.content}`,
+      ),
+    ].join('\n');
 
-    // ─────────────────────────────────────────────────────────────────────
-    // ÉTAPE 3 : CHIEF OF STAFF PROMPT (Forcer le raisonnement basé sur les preuves)
-    // ─────────────────────────────────────────────────────────────────────
-    const systemPrompt = `Tu es Kloyya, le Chef de Cabinet IA d'un dirigeant. Ta mission est d'analyser les données internes de l'entreprise pour prendre des décisions éclairées, PAS de chercher sur Internet par défaut.
+    const hasInternalEvidence = syncEvidence.length > 0 || internalMemories.length > 0 || internalGraph.length > 0;
+    const allowWebSearch = isExternalQuestion(question);
 
-OUTILS CONNECTÉS DISPONIBLES : ${availableTools || 'Aucun outil connecté'}
+    const system = `Tu es Kloyya, le Chef de Cabinet IA.
 
-DONNÉES INTERNES RÉCUPÉRÉES :
-${evidenceText}
+Tu dois d'abord travailler avec les données internes réellement récupérées des outils connectés.
 
-RÈGLES STRICTES :
-1. Base ta réponse EXCLUSIVEMENT sur les "DONNÉES INTERNES RÉCUPÉRÉES" ci-dessus.
-2. Si les données internes sont insuffisantes, dis clairement : "Je ne peux pas prendre cette décision avec confiance car il manque des données internes. Voici ce que j'ai trouvé : [résumé]".
-3. N'utilise la recherche Web que si la question porte explicitement sur l'actualité externe.
-4. Réponds STRICTEMENT au format JSON suivant, sans aucun texte en dehors du JSON.
+OUTILS CONNECTÉS ACTIFS:
+${connected.length ? connected.join(', ') : 'Aucun'}
 
-FORMAT DE RÉPONSE OBLIGATOIRE :
+DONNÉES INTERNES RÉCUPÉRÉES:
+${hasInternalEvidence ? evidenceText : 'AUCUNE DONNÉE INTERNE RÉCUPÉRÉE.'}
+
+RÈGLES:
+1. Pour une question sur l'entreprise, les clients, l'équipe, les projets, les contrats, les emails, les documents ou les opérations, utilise les données CONNECTED comme source principale.
+2. Ne prétends jamais avoir lu un outil qui n'a pas fourni de données.
+3. Si aucune donnée interne pertinente n'a été trouvée, dis-le clairement.
+4. La recherche Web est autorisée uniquement lorsque la question demande une information externe, récente ou de marché.
+5. Sépare les faits, l'analyse, les risques et la recommandation.
+6. Si les preuves se contredisent, signale la contradiction.
+7. Ne fabrique aucune information.
+8. Pour une décision importante, indique toujours ce qui manque avant de recommander.
+9. Retourne UNIQUEMENT le JSON demandé.
+
+FORMAT:
 {
-  "decision": "ACCEPTER | REFUSER | NÉGOCIER | INVESTIGUER",
-  "confidence_score": 0.85,
-  "reasoning": ["Raison 1 basée sur les faits internes", "Raison 2"],
+  "decision": "ACCEPTER | REFUSER | NEGOCIER | INVESTIGUER",
+  "confidence_score": 0.0,
+  "reasoning": ["..."],
   "evidence": [
-    {
-      "claim": "Le fait observé",
-      "source": "gmail | slack | notion | memory | graph",
-      "confidence": 0.9
-    }
+    {"claim": "...", "source": "...", "confidence": 0.0}
   ],
-  "risks": ["Risque identifié"],
-  "missing_information": ["Information manquante pour être sûr à 100%"],
-  "recommended_action": "Action concrète à proposer"
+  "risks": ["..."],
+  "missing_information": ["..."],
+  "recommended_action": "..."
 }`;
 
-    // ─────────────────────────────────────────────────────────────────────
-    // ÉTAPE 4 : APPEL AU FOURNISSEUR D'IA
-    // ─────────────────────────────────────────────────────────────────────
-    const aiResponse = await provider.chat({
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: question }
-      ],
-      temperature: 0.1, // Très bas pour un raisonnement factuel et déterministe
+    const aiResponse = await provider.complete({
+      system,
+      messages: [{ role: 'user', content: question }],
+      maxTokens: 1600,
+      allowWebSearch,
     });
 
-    // ─────────────────────────────────────────────────────────────────────
-    // ÉTAPE 5 : PARSING ROBUSTE ET FORMATAGE POUR LE FRONTEND
-    // ─────────────────────────────────────────────────────────────────────
-    let parsed;
-    try {
-      const jsonMatch = aiResponse.content.match(/```json\s*([\s\S]*?)\s*```/) || aiResponse.content.match(/\{[\s\S]*\}/);
-      const jsonString = jsonMatch ? jsonMatch[0].replace(/```json|```/g, '').trim() : aiResponse.content;
-      parsed = JSON.parse(jsonString);
-    } catch (e) {
-      parsed = {
-        decision: 'INVESTIGUER',
-        confidence_score: 0.5,
-        reasoning: ['Le modèle n\'a pas pu structurer sa réponse en JSON.'],
-        evidence: [],
-        risks: ['Format de réponse invalide'],
-        missing_information: ['Données non structurées'],
-        recommended_action: 'Veuillez reformuler votre demande ou vérifier les connexions des outils.'
-      };
-    }
-
-    // Formatage pour correspondre au type `AskAnswer` attendu par le frontend
-    return {
-      ok: true,
-      result: {
-        answer: parsed.recommended_action,
-        decision: parsed.decision,
-        confidence: parsed.confidence_score,
-        reasoning: parsed.reasoning,
-        citations: parsed.evidence.map((e: any) => ({ 
-          label: e.claim, 
-          source: e.source, 
-          freshness: new Date().toISOString() 
-        })),
-        risks: parsed.risks,
-        missing: parsed.missing_information,
-      }
+    const parsed = extractJson(aiResponse.text) ?? {
+      decision: 'INVESTIGUER',
+      confidence_score: 0.35,
+      reasoning: [stripFootnoteMarkers(aiResponse.text).slice(0, 1200)],
+      evidence: [],
+      risks: ['Réponse non structurée par le modèle.'],
+      missing_information: hasInternalEvidence ? [] : ['Données internes pertinentes non trouvées.'],
+      recommended_action: 'Vérifier les outils connectés et relancer la question.',
     };
 
+    const reasoning = arrayOfStrings(parsed.reasoning);
+    const risks = arrayOfStrings(parsed.risks);
+    const missing = arrayOfStrings(parsed.missing_information);
+    const evidence = Array.isArray(parsed.evidence) ? parsed.evidence : [];
+
+    const confidence = typeof parsed.confidence_score === 'number'
+      ? Math.max(0, Math.min(1, parsed.confidence_score))
+      : 0.35;
+
+    return {
+      ok: true as const,
+      result: {
+        answer: typeof parsed.recommended_action === 'string'
+          ? parsed.recommended_action
+          : 'Investiguer avant de décider.',
+        decision: typeof parsed.decision === 'string' ? parsed.decision : 'INVESTIGUER',
+        confidence,
+        reasoning,
+        citations: evidence.map((item: any) => ({
+          label: typeof item?.claim === 'string' ? item.claim : 'Preuve interne',
+          source: typeof item?.source === 'string' ? item.source : 'connected',
+          freshness: new Date().toISOString(),
+        })),
+        risks,
+        missing,
+      },
+    };
   } catch (error) {
     console.error('[Ask Service] Critical Error:', error);
     return {
-      ok: false,
-      reason: 'ai_unavailable',
-      error
+      ok: false as const,
+      reason: 'ai_unavailable' as const,
+      error,
     };
   }
 }
+
