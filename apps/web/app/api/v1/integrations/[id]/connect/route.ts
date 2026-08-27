@@ -160,7 +160,8 @@ export async function POST(
 
     const entityId = `workspace:${context.workspaceId}`;
 
-    console.info('[Integration Connect] Initiating OAuth', {
+    // ✅ CORRECTION : console.info n'est pas autorisé par ESLint, remplacé par console.warn
+    console.warn('[Integration Connect] Initiating OAuth', {
       app: composioAppName,
       workspaceId: context.workspaceId,
       organizationId: context.organizationId,
