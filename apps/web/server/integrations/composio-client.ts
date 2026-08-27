@@ -1,30 +1,29 @@
 import { Composio } from 'composio-core';
 
-let composioClient: Composio | null = null;
+let client: Composio | undefined;
 
 /**
- * Retourne le client Composio uniquement côté serveur.
+ * Client Composio serveur.
  *
- * La clé doit obligatoirement être fournie par l'environnement.
- * On ne fournit volontairement aucune fausse clé : une mauvaise
- * configuration doit être détectée immédiatement au runtime.
+ * La clé API est uniquement lue au runtime depuis
+ * COMPOSIO_API_KEY.
  */
 export function getComposioClient(): Composio {
-  if (composioClient) {
-    return composioClient;
+  if (client) {
+    return client;
   }
 
   const apiKey = process.env.COMPOSIO_API_KEY;
 
   if (!apiKey) {
     throw new Error(
-      'COMPOSIO_API_KEY is not configured. Add it to the Vercel environment variables.',
+      'COMPOSIO_API_KEY is missing. Configure it in Vercel Environment Variables.',
     );
   }
 
-  composioClient = new Composio({
+  client = new Composio({
     apiKey,
   });
 
-  return composioClient;
+  return client;
 }
