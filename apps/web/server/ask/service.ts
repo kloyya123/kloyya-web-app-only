@@ -1,22 +1,28 @@
 import { eq, and, gte, desc, sql } from 'drizzle-orm';
 import { db } from '@kloyya/db';
 import { connections, graphNodes, memories } from '@kloyya/db/schema';
-import type { StartContext } from '@server/tenant'; // Ajuste l'import selon ton type réel
 import type { AiProvider } from '@server/ai/provider';
-import type { WebSearch } from '@server/ask/web-search';
 
 /**
  * LE CŒUR DU CHEF DE CABINET : Service "ask" réécrit pour l'orchestration.
  * Il lit les données internes AVANT de faire appel au LLM.
  */
 export async function ask(
-  dbInstance: any, // Remplace par le type Drizzle réel si nécessaire
-  start: StartContext,
+  dbInstance: any, // Type Drizzle DB
+  start: any,      // StartContext (évite les erreurs d'import de chemin)
   question: string,
-  provider: AiProvider,
-  _context: any, // Ancien argument undefined, maintenant ignoré car on le reconstruit
-  webSearch: WebSearch
+  provider: AiProvider | null, // ✅ CORRECTION : Accepter null si non configuré
+  _context: any,
+  webSearch: any
 ) {
+  // ✅ CORRECTION : Gérer le cas où aucun fournisseur d'IA n'est configuré
+  if (!provider) {
+    return {
+      ok: false,
+      reason: 'not_configured',
+    };
+  }
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -42,7 +48,6 @@ export async function ask(
     // ─────────────────────────────────────────────────────────────────────
     // ÉTAPE 2 : EVIDENCE ENGINE (Lire les preuves internes AVANT de répondre)
     // ─────────────────────────────────────────────────────────────────────
-    // On interroge le graphe de connaissances et les mémoires récentes
     const internalMemories = await dbInstance
       .select({ 
         type: sql<string>`'memory'`,
@@ -98,7 +103,7 @@ ${evidenceText}
 RÈGLES STRICTES :
 1. Base ta réponse EXCLUSIVEMENT sur les "DONNÉES INTERNES RÉCUPÉRÉES" ci-dessus.
 2. Si les données internes sont insuffisantes, dis clairement : "Je ne peux pas prendre cette décision avec confiance car il manque des données internes. Voici ce que j'ai trouvé : [résumé]".
-3. N'utilise la recherche Web que si la question porte explicitement sur l'actualité externe (ex: "Cours de l'action Apple").
+3. N'utilise la recherche Web que si la question porte explicitement sur l'actualité externe.
 4. Réponds STRICTEMENT au format JSON suivant, sans aucun texte en dehors du JSON.
 
 FORMAT DE RÉPONSE OBLIGATOIRE :
@@ -115,13 +120,12 @@ FORMAT DE RÉPONSE OBLIGATOIRE :
   ],
   "risks": ["Risque identifié"],
   "missing_information": ["Information manquante pour être sûr à 100%"],
-  "recommended_action": "Action concrète à proposer (ex: 'Préparer un brouillon d'email')"
+  "recommended_action": "Action concrète à proposer"
 }`;
 
     // ─────────────────────────────────────────────────────────────────────
     // ÉTAPE 4 : APPEL AU FOURNISSEUR D'IA
     // ─────────────────────────────────────────────────────────────────────
-    // (Ajuste l'appel ci-dessous pour qu'il corresponde exactement à ton interface AiProvider)
     const aiResponse = await provider.chat({
       messages: [
         { role: 'system', content: systemPrompt },
@@ -139,7 +143,6 @@ FORMAT DE RÉPONSE OBLIGATOIRE :
       const jsonString = jsonMatch ? jsonMatch[0].replace(/```json|```/g, '').trim() : aiResponse.content;
       parsed = JSON.parse(jsonString);
     } catch (e) {
-      // Fallback sécurisé si le LLM ne respecte pas le JSON
       parsed = {
         decision: 'INVESTIGUER',
         confidence_score: 0.5,
@@ -151,11 +154,11 @@ FORMAT DE RÉPONSE OBLIGATOIRE :
       };
     }
 
-    // Formatage pour correspondre au type `AskAnswer` attendu par ton frontend (`AskView`)
+    // Formatage pour correspondre au type `AskAnswer` attendu par le frontend
     return {
       ok: true,
       result: {
-        answer: parsed.recommended_action, // Le texte principal affiché
+        answer: parsed.recommended_action,
         decision: parsed.decision,
         confidence: parsed.confidence_score,
         reasoning: parsed.reasoning,
@@ -166,7 +169,6 @@ FORMAT DE RÉPONSE OBLIGATOIRE :
         })),
         risks: parsed.risks,
         missing: parsed.missing_information,
-        // Tu pourras ajouter ici la logique pour `action: { type: 'draft_email', href: '...' }` plus tard
       }
     };
 
