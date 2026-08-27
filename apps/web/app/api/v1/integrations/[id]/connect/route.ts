@@ -4,8 +4,7 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { getComposioClient } from '@/server/integrations/composio-client';
 import { db } from '@kloyya/db';
-import { users } from '@kloyya/db/schema';
-import { eq } from 'drizzle-orm';
+import { resolveStartContext } from '@/server/tenant';
 
 export async function POST(
   request: NextRequest,
@@ -36,16 +35,9 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const [userRecord] = await db
-      .select({ 
-        organizationId: users.organizationId, 
-        activeWorkspaceId: users.activeWorkspaceId 
-      })
-      .from(users)
-      .where(eq(users.id, user.id))
-      .limit(1);
+    const ctx = await resolveStartContext(db, user.id);
 
-    if (!userRecord || !userRecord.organizationId || !userRecord.activeWorkspaceId) {
+    if (!ctx || !ctx.organizationId || !ctx.workspaceId) {
       console.error('[Composio Connect] User profile incomplete');
       return NextResponse.json({ error: 'User profile incomplete' }, { status: 400 });
     }
