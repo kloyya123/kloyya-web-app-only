@@ -286,11 +286,11 @@ export function resolveAiProvider(config: ProviderConfig): AiProvider | null {
 
   return {
     get name() {
-      return active.name;
-    },
-    get model() {
-      return active.model;
-    },
+  return active?.name ?? config.provider;
+},
+get model() {
+  return active?.model ?? "";
+},
     async complete(params) {
       let lastError: unknown;
 
