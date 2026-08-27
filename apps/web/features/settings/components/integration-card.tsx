@@ -17,15 +17,27 @@ export function IntegrationCard({ appName, displayName, description, icon }: Int
   async function handleConnect() {
     setIsConnecting(true);
     try {
-      // Appel à notre API route qui parle à Composio
       const response = await fetch(`/api/v1/integrations/${appName}/connect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to connect');
+        // ✅ SÉCURITÉ : Parsing JSON sécurisé au cas où le serveur renvoie du HTML (ex: erreur 500 brute)
+        let errorData: Record<string, unknown> = {};
+        try {
+          errorData = await response.json();
+        } catch (e) {
+          // Ignorer si la réponse n'est pas du JSON valide
+        }
+        
+        // ✅ SÉCURITÉ : On privilégie le champ 'details' (notre nouveau message précis), puis 'error', puis un fallback
+        const errorMsg = 
+          (typeof errorData.details === 'string' ? errorData.details : null) || 
+          (typeof errorData.error === 'string' ? errorData.error : null) || 
+          `Erreur serveur (${response.status})`;
+          
+        throw new Error(errorMsg);
       }
 
       const data = await response.json();
@@ -34,11 +46,16 @@ export function IntegrationCard({ appName, displayName, description, icon }: Int
       if (data.redirectUrl) {
         window.location.href = data.redirectUrl;
       } else {
-        throw new Error('No redirect URL provided');
+        throw new Error('Aucune URL de redirection fournie par le serveur.');
       }
-    } catch (error) {
-      console.error('[Integration Connect Error]:', error);
-      toast.error(`Impossible de connecter ${displayName}. Veuillez réessayer.`);
+    } catch (error: unknown) {
+      // ✅ SÉCURITÉ : Extraction du message sans jamais planter, même si l'objet error est bizarre
+      const errorMessage = error instanceof Error ? error.message : 'Une erreur inattendue est survenue.';
+      
+      console.error(`[Integration Connect Error - ${appName}]:`, error);
+      
+      // On affiche le vrai message d'erreur dans le toast pour le débogage
+      toast.error(errorMessage);
     } finally {
       setIsConnecting(false);
     }
