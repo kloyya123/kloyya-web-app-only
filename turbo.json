@@ -32,9 +32,11 @@
         "SLACK_OAUTH_CLIENT_SECRET",
         "SLACK_OAUTH_REDIRECT_URI",
         "SLACK_SIGNING_SECRET",
+        "COMPOSIO_API_KEY",
         "AI_PROVIDER",
         "PERPLEXITY_API_KEY",
         "PERPLEXITY_MODEL",
+        "PERPLEXITY_CHAT_MODEL",
         "OPENAI_API_KEY",
         "OPENAI_MODEL",
         "ANTHROPIC_API_KEY",
@@ -68,3 +70,4 @@
     }
   }
 }
+
