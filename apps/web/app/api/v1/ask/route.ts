@@ -1,231 +1,130 @@
 import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
-import { cookies } from 'next/headers';
-import { createServerClient } from '@supabase/ssr';
-import { db } from '@kloyya/db';
-import { memories, graphNodes, users } from '@kloyya/db/schema';
-import { eq, and, gte, desc, sql } from 'drizzle-orm';
-import type { GraphNode, Memory } from '@kloyya/db';
-import { 
-  DECISION_ENGINE_SYSTEM_PROMPT, 
-  buildDecisionPrompt, 
-  type DecisionContext 
-} from '@/server/ai/decision-engine';
+import { z } from 'zod';
+import { entitlementsFor } from '@kloyya/core';
+import { resolveAiProvider } from '@server/ai/provider';
+import { ask } from '@server/ask/service';
+import { getAskCountToday, releaseAskCount, reserveAskCount } from '@server/ask/usage';
+import { resolveWebSearch } from '@server/ask/web-search';
+import { config } from '@server/config';
+import { ok } from '@server/http/envelope';
+import { API_STATUS, ApiError, errors } from '@server/http/errors';
+import { kasRoute } from '@server/http/handler';
+import { checkRateLimit } from '@server/http/rate-limit';
+import { readTier } from '@server/plan/tier';
+import { resolveStartContext } from '@server/tenant';
 
-type GraphNodeType = 'person' | 'project' | 'document' | 'meeting' | 'decision' | 'task' | 'conversation' | 'tool' | 'knowledge';
-type MemoryLayer = 'short_term' | 'working' | 'session' | 'long_term' | 'organizational' | 'knowledge' | 'decision' | 'conversational' | 'user';
+// A real model call the first time nothing is cached — same budget as the
+// meeting-briefing route, which does the same kind of work.
+export const maxDuration = 60;
 
-interface ParsedRecommendation {
-  recommendation?: string;
-  evidence?: Array<{ source?: string }>;
-}
+const bodySchema = z.object({
+  question: z.string().trim().min(1, 'Ask Kloyya something first.'),
+  conversationId: z.string().optional(),
+});
 
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    
-    const { question, conversationId } = body;
-    let userId = body.userId;
-    let workspaceId = body.workspaceId;
-    let organizationId = body.organizationId;
+/**
+ * POST /api/v1/ask
+ *
+ * Identity, quota, and evidence all come from the server side, never from the
+ * request body — see server/tenant.ts and server/ask/service.ts for why. The
+ * body carries only the question.
+ */
+export const POST = kasRoute('verified', async (req, routeCtx) => {
+  const { question } = bodySchema.parse(await req.json());
 
-    if (!question || question.trim().length === 0) {
-      return NextResponse.json({ error: 'Missing question in request body' }, { status: 400 });
-    }
+  const start = await resolveStartContext(routeCtx.db, routeCtx.identity.id);
+  if (!start) throw errors.notFound('User profile');
 
-    // 🛡️ ROBUSTESSE : Récupération sécurisée de l'utilisateur via getUser()
-    if (!workspaceId || !organizationId || !userId) {
-      const cookieStore = await cookies();
-      const supabase = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        {
-          cookies: {
-            getAll() { return cookieStore.getAll(); },
-            setAll() {}
-          }
-        }
-      );
-      
-      // ✅ CORRECTION : Utilisation de getUser() au lieu de getSession() pour valider le JWT côté serveur
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      
-      if (userError || !user) {
-        return NextResponse.json({ error: 'Unauthorized: No active session found' }, { status: 401 });
-      }
-
-      const [userRecord] = await db
-        .select({ 
-          organizationId: users.organizationId, 
-          activeWorkspaceId: users.activeWorkspaceId 
-        })
-        .from(users)
-        .where(eq(users.id, user.id))
-        .limit(1);
-
-      if (!userRecord || !userRecord.organizationId || !userRecord.activeWorkspaceId) {
-        return NextResponse.json({ 
-          error: 'User profile incomplete: missing organization or active workspace. Please complete onboarding.' 
-        }, { status: 400 });
-      }
-
-      workspaceId = userRecord.activeWorkspaceId;
-      organizationId = userRecord.organizationId;
-      userId = user.id;
-    }
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const recentMemoriesData = await db
-      .select({ title: memories.title, content: memories.content, layer: memories.layer })
-      .from(memories)
-      .where(
-        and(
-          eq(memories.workspaceId, workspaceId),
-          eq(memories.organizationId, organizationId),
-          gte(memories.createdAt, today),
-          sql`${memories.layer} IN ('short_term', 'working', 'decision')`
-        )
-      )
-      .orderBy(desc(memories.importance))
-      .limit(10);
-
-    const recentNodesData = await db
-      .select({ name: graphNodes.name, type: graphNodes.type, content: graphNodes.content })
-      .from(graphNodes)
-      .where(
-        and(
-          eq(graphNodes.workspaceId, workspaceId),
-          eq(graphNodes.organizationId, organizationId),
-          gte(graphNodes.lastSeenAt, today)
-        )
-      )
-      .orderBy(desc(graphNodes.lastSeenAt))
-      .limit(15);
-
-    const conversationHistory = await db
-      .select({ content: memories.content })
-      .from(memories)
-      .where(
-        and(
-          eq(memories.workspaceId, workspaceId),
-          eq(memories.organizationId, organizationId),
-          userId ? eq(memories.userId, userId) : sql`1=1`,
-          eq(memories.layer, 'conversational')
-        )
-      )
-      .orderBy(desc(memories.createdAt))
-      .limit(5);
-
-    const historyText =
-      conversationHistory.length > 0
-        ? 'Historique récent :\n' + conversationHistory.map((m) => `- ${m.content}`).join('\n')
-        : 'Aucun historique précédent.';
-
-    const nodes: GraphNode[] = recentNodesData.map((n) => ({
-      id: 'temp-id',
-      workspaceId,
-      organizationId,
-      type: n.type as GraphNodeType,
-      name: n.name || 'Unknown',
-      content: n.content || '',
-      metadata: {},
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    } as GraphNode));
-
-    const memoriesObj: Memory[] = recentMemoriesData.map((m) => ({
-      id: 'temp-id',
-      workspaceId,
-      organizationId,
-      layer: m.layer as MemoryLayer,
-      title: m.title || 'Unknown',
-      content: m.content || '',
-      metadata: {},
-      importance: 1,
-      accessCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    } as Memory));
-
-    const context: DecisionContext = {
-      userId: userId || 'unknown',
-      workspaceId,
-      organizationId,
-      query: `${historyText}\n\nNouvelle question : ${question}`,
-      nodes,
-      edges: [],
-      memories: memoriesObj,
-      currentTime: new Date().toISOString(),
-    };
-
-    const finalPrompt = buildDecisionPrompt(context);
-
-    const perplexityResponse = await fetch('https://api.perplexity.ai/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.CLE_SONAR_API_KLOYYA2}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'sonar',
-        messages: [
-          { role: 'system', content: DECISION_ENGINE_SYSTEM_PROMPT },
-          { role: 'user', content: finalPrompt }
-        ],
-        temperature: 0.2,
-        max_tokens: 1500,
-      }),
+  // A tight per-minute guard against a burst of real, billable AI calls —
+  // separate from the daily entitlement cap below, which says nothing about
+  // the next 60 seconds.
+  const burst = await checkRateLimit(routeCtx.db, `ai:${start.userId}`, config.AI_RATE_LIMIT_PER_MINUTE);
+  if (!burst.allowed) {
+    throw new ApiError({
+      httpStatus: API_STATUS.RateLimited,
+      errorCode: 'ask_rate_limited',
+      message: 'Slow down — that’s a lot of requests in one minute.',
+      description: `Kloyya allows ${burst.limit} AI requests per minute per person.`,
+      suggestedResolution: `Wait about ${burst.retryAfterSeconds} seconds and try again.`,
     });
-
-    if (!perplexityResponse.ok) {
-      const errorText = await perplexityResponse.text();
-      console.error('[Ask API] Perplexity Error:', perplexityResponse.status, errorText);
-      throw new Error(`Perplexity API error: ${perplexityResponse.statusText}`);
-    }
-
-    const data = await perplexityResponse.json();
-    const aiContent = data.choices[0].message.content;
-
-    let parsedResponse: { summary: string; recommendations?: ParsedRecommendation[] };
-    try {
-      const jsonMatch = aiContent.match(/```json\s*([\s\S]*?)\s*```/);
-      const jsonString = jsonMatch ? jsonMatch[1] : aiContent;
-      parsedResponse = JSON.parse(jsonString);
-    } catch {
-      console.error('[Ask API] Failed to parse JSON. Raw content:', aiContent);
-      parsedResponse = {
-        summary: aiContent,
-        recommendations: [],
-      };
-    }
-
-        await db.insert(memories).values({
-      workspaceId,
-      organizationId,
-      userId: userId || null,
-      layer: 'conversational',
-      title: `Query: ${question.substring(0, 50)}...`,
-      content: `User: ${question}\nKloyya: ${parsedResponse.summary}`,
-      metadata: { conversationId, timestamp: new Date().toISOString() },
-      importance: 80, // ✅ CORRECTION : Nombre entier attendu par la BDD
-    });
-
-    const formattedResponse = {
-      answer: parsedResponse.summary,
-      citations: (parsedResponse.recommendations || []).map((rec: ParsedRecommendation) => ({
-        source: rec.evidence?.[0]?.source || 'kloyya_analysis',
-        label: rec.recommendation || 'Recommandation',
-        freshness: new Date().toISOString(),
-      })),
-      usage: { remaining: 28 },
-    };
-
-    return NextResponse.json(formattedResponse, { status: 200 });
-
-  } catch (error) {
-    console.error('[Ask API] Critical Error:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
-}
+
+  const dailyLimit = entitlementsFor(await readTier(routeCtx.db, start)).askPerDay;
+  const reservation = await reserveAskCount(routeCtx.db, start, dailyLimit);
+  if (!reservation.allowed) {
+    throw new ApiError({
+      httpStatus: API_STATUS.RateLimited,
+      errorCode: 'ask_limit_reached',
+      message: 'You’ve reached today’s Ask Kloyya limit.',
+      description: `Your plan allows ${reservation.limit} questions per day.`,
+      suggestedResolution: 'Try again tomorrow, or upgrade for unlimited questions.',
+    });
+  }
+
+  const provider = resolveAiProvider({
+    provider: config.AI_PROVIDER,
+    openaiApiKey: config.OPENAI_API_KEY,
+    openaiModel: config.OPENAI_MODEL,
+    anthropicApiKey: config.ANTHROPIC_API_KEY,
+    anthropicModel: config.ANTHROPIC_MODEL,
+    perplexityApiKey: config.PERPLEXITY_API_KEY,
+    perplexityChatModel: config.PERPLEXITY_CHAT_MODEL,
+    nvidiaApiKey: config.NVIDIA_API_KEY,
+    nvidiaModel: config.NVIDIA_MODEL,
+    huggingfaceApiKey: config.HUGGINGFACE_API_KEY,
+    huggingfaceModel: config.HUGGINGFACE_MODEL,
+  });
+
+  const webSearch = resolveWebSearch({
+    perplexityApiKey: config.PERPLEXITY_API_KEY,
+    perplexityModel: config.PERPLEXITY_MODEL,
+    tavilyApiKey: config.TAVILY_API_KEY,
+  });
+
+  let outcome;
+  try {
+    outcome = await ask(routeCtx.db, start, question, provider, undefined, webSearch);
+  } catch (error) {
+    // The provider call never happened or blew up before answering — give the
+    // question back rather than silently burning it.
+    await releaseAskCount(routeCtx.db, start, reservation.day);
+    throw error;
+  }
+
+  if (!outcome.ok) {
+    // A configured-but-unreachable provider, or none configured at all, isn't
+    // a spent question either.
+    await releaseAskCount(routeCtx.db, start, reservation.day);
+    throw outcome.reason === 'not_configured'
+      ? new ApiError({
+          httpStatus: API_STATUS.ServiceUnavailable,
+          errorCode: 'ai_unconfigured',
+          message: 'Ask Kloyya isn’t set up yet.',
+          description: 'No AI provider is configured for this deployment.',
+          suggestedResolution: 'Contact support — this is a deployment issue, not something you can fix.',
+        })
+      : new ApiError({
+          httpStatus: API_STATUS.ServiceUnavailable,
+          errorCode: 'ai_unavailable',
+          message: 'Ask Kloyya is temporarily unavailable.',
+          description: 'The AI provider didn’t respond in time.',
+          suggestedResolution: 'Try again in a moment.',
+        });
+  }
+
+  const usedToday = await getAskCountToday(routeCtx.db, start);
+
+  return NextResponse.json(
+    ok(
+      {
+        ...outcome.result,
+        usage: {
+          used: usedToday,
+          limit: dailyLimit,
+          remaining: dailyLimit === null ? null : Math.max(0, dailyLimit - usedToday),
+        },
+      },
+      routeCtx.correlationId,
+    ),
+  );
+});
