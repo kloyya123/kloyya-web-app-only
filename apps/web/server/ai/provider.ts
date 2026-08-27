@@ -35,15 +35,20 @@ export class AiError extends Error {
 
 export interface ProviderConfig {
   provider: 'openai' | 'anthropic' | 'perplexity' | 'nvidia' | 'huggingface';
-  openaiApiKey?: string;
+
+  openaiApiKey: string | undefined;
   openaiModel: string;
-  anthropicApiKey?: string;
+
+  anthropicApiKey: string | undefined;
   anthropicModel: string;
-  perplexityApiKey?: string;
+
+  perplexityApiKey: string | undefined;
   perplexityChatModel: string;
-  nvidiaApiKey?: string;
+
+  nvidiaApiKey: string | undefined;
   nvidiaModel: string;
-  huggingfaceApiKey?: string;
+
+  huggingfaceApiKey: string | undefined;
   huggingfaceModel: string;
 }
 
