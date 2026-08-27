@@ -1,0 +1,5 @@
+integrationId
+status
+grantedScopes
+lastSyncedAt
+syncCursors
