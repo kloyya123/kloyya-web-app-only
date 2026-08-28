@@ -1,16 +1,15 @@
+
 import type { IsoTimestamp } from './domain.js';
 
 /**
  * The integration catalogue and connection lifecycle.
  *
- * From the "Select Your Tools" spec: categorized integrations, each card showing
- * description, permissions requested, estimated sync time, and connection
- * status — with a mandatory permission review before connecting.
+ * The catalogue describes what can be connected.
+ * A live connection describes what is currently connected.
  *
- * Distinct from `ConnectedSource` (types/sources.ts) on purpose: the catalogue
- * describes what *can* be connected; a source describes the live intelligence a
- * connection produces. The manager operates on connections; the Trust Center
- * inspects sources.
+ * Icons are part of the catalogue because the Connections UI should have
+ * exactly one source of truth for an integration's identity, metadata,
+ * permissions, and presentation.
  */
 
 export const INTEGRATION_CATEGORIES = [
@@ -29,13 +28,14 @@ export const INTEGRATION_CATEGORIES = [
   'marketing',
   'custom',
 ] as const;
+
 export type IntegrationCategory = (typeof INTEGRATION_CATEGORIES)[number];
 
 /**
  * What Kloyya will and will not do with a connection.
- * The spec: "Explain exactly what Kloyya will access. Transparency is mandatory."
- * Both lists are required and non-empty — a review with nothing to review is
- * not a review.
+ *
+ * Both lists are required and non-empty because the user must be able to
+ * review what access Kloyya requests before connecting an integration.
  */
 export interface IntegrationPermissions {
   granted: [string, ...string[]];
@@ -43,20 +43,41 @@ export interface IntegrationPermissions {
 }
 
 export interface IntegrationDefinition {
-  /** Stable id, e.g. 'gmail'. Matches SourceProvider where the two overlap. */
+  /** Stable id, e.g. 'gmail'. */
   id: string;
+
+  /** Human-readable integration name. */
   name: string;
+
+  /** Product category displayed in the Connections Manager. */
   category: IntegrationCategory;
-  /** One sentence: what connecting this teaches Kloyya. */
+
+  /** One sentence explaining what connecting this teaches Kloyya. */
   description: string;
+
+  /** What Kloyya can and cannot access. */
   permissions: IntegrationPermissions;
+
   /** Ballpark for the first full sync, shown on the card. */
   estimatedSyncMinutes: number;
+
+  /**
+   * Public icon path used by the web Connections Manager.
+   *
+   * Example:
+   * `/icons/gmail.svg`
+   *
+   * This remains presentation metadata only; authentication and provider
+   * configuration are handled by the integration service.
+   */
+  icon: string;
 }
 
 /**
- * Connection lifecycle. `error` carries a human-readable reason and offers
- * Reconnect; `paused` keeps the data but stops syncing.
+ * Connection lifecycle.
+ *
+ * `error` carries a human-readable reason and offers Reconnect.
+ * `paused` keeps the data but stops syncing.
  */
 export const CONNECTION_STATUSES = [
   'not_connected',
@@ -66,22 +87,24 @@ export const CONNECTION_STATUSES = [
   'paused',
   'error',
 ] as const;
+
 export type ConnectionStatus = (typeof CONNECTION_STATUSES)[number];
 
 export interface IntegrationConnection {
   definition: IntegrationDefinition;
   status: ConnectionStatus;
   lastSyncedAt: IsoTimestamp | null;
-  /** Present only when status is 'error'. Says what is wrong and what to do. */
+
+  /** Present only when status is `error`. */
   errorReason?: string;
 }
 
 /**
  * Whether an integration counts toward "connected sources".
  *
- * Everything except `not_connected` — a paused or errored integration is still
- * connected, it just is not syncing. The single source of truth for this rule,
- * so the manager, the widget, and the summary all agree.
+ * Everything except `not_connected` is considered connected.
+ * A paused or errored integration still has an established connection,
+ * even though it is not currently syncing.
  */
 export function isConnected(connection: IntegrationConnection): boolean {
   return connection.status !== 'not_connected';
