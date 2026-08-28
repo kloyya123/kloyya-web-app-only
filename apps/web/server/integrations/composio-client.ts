@@ -14,13 +14,16 @@ export function getComposioClient() {
 
   return {
     connectedAccounts: {
+      /**
+       * Crée un lien de session d'authentification
+       */
       async link(userId: string, authConfigId: string, redirectUri?: string) {
         const payload: any = {
           user_id: userId,
           auth_config_id: authConfigId,
         };
 
-        // Ajoute l'URL de callback si fournie (le champ API v3 s'appelle "callback_url", pas "redirect_uri")
+        // Ajoute l'URL de callback si fournie (le champ API v3 s'appelle "callback_url")
         if (redirectUri) {
           payload.callback_url = redirectUri;
         }
@@ -66,6 +69,25 @@ export function getComposioClient() {
           connectedAccountId,
         };
       },
+
+      /**
+       * Récupère les comptes connectés pour un workspace donné
+       */
+      async getConnectedAccounts(workspaceId: string) {
+        const res = await fetch(`${COMPOSIO_BASE_URL}/connected_accounts?entity_id=workspace:${workspaceId}`, {
+          headers: {
+            'x-api-key': apiKey,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!res.ok) {
+          const errorText = await res.text();
+          throw new Error(`Composio API error fetching accounts: HTTP ${res.status} - ${errorText}`);
+        }
+
+        return await res.json();
+      }
     },
   };
 }
