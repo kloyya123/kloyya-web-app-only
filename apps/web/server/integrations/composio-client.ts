@@ -1,34 +1,26 @@
+
 /**
- * Client Composio — API v3 officielle.
+ * Client Composio utilisant l'API v3 officielle.
  *
- * Les connexions sont liées au user_id Composio.
- * Kloyya utilise l'id Supabase de l'utilisateur comme identité Composio.
+ * Responsabilités :
+ * - démarrer une connexion OAuth ;
+ * - récupérer les comptes connectés ;
+ * - fournir une interface serveur unique à Kloyya.
+ *
+ * IMPORTANT :
+ * Ce fichier est server-only. La clé COMPOSIO_API_KEY ne doit jamais
+ * être exposée au navigateur.
  */
 
 const COMPOSIO_BASE_URL = "https://backend.composio.dev/api/v3";
 
-type ComposioConnectedAccount = {
-  id?: string;
-  user_id?: string;
-  status?: string;
-  toolkit?: {
-    slug?: string;
-  };
-  auth_config?: {
-    id?: string;
-  };
-  created_at?: string;
-  updated_at?: string;
-  status_reason?: string;
+type ComposioResponse = Record<string, unknown>;
+
+type FetchOptions = RequestInit & {
+  headers?: Record<string, string>;
 };
 
-type ComposioConnectedAccountsResponse = {
-  items?: ComposioConnectedAccount[];
-  next_cursor?: string;
-  total_items?: number;
-};
-
-export function getComposioClient() {
+function getApiKey(): string {
   const apiKey = process.env.COMPOSIO_API_KEY;
 
   if (!apiKey) {
@@ -37,37 +29,96 @@ export function getComposioClient() {
     );
   }
 
-  async function composioFetch(
-    path: string,
-    options: RequestInit = {},
-  ): Promise<Response> {
-    return fetch(`${COMPOSIO_BASE_URL}${path}`, {
-      ...options,
-      headers: {
-        "x-api-key": apiKey,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        ...(options.headers ?? {}),
-      },
-      cache: "no-store",
-    });
+  return apiKey;
+}
+
+async function composioFetch(
+  path: string,
+  options: FetchOptions = {},
+): Promise<ComposioResponse> {
+  const apiKey = getApiKey();
+
+  const response = await fetch(`${COMPOSIO_BASE_URL}${path}`, {
+    ...options,
+    headers: {
+      "x-api-key": apiKey,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...(options.headers ?? {}),
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+
+    throw new Error(
+      `Composio API error: HTTP ${response.status} - ${errorText}`,
+    );
   }
 
+  return (await response.json()) as ComposioResponse;
+}
+
+function getString(
+  object: ComposioResponse | undefined,
+  ...keys: string[]
+): string | null {
+  if (!object) {
+    return null;
+  }
+
+  for (const key of keys) {
+    const value = object[key];
+
+    if (typeof value === "string" && value.trim() !== "") {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function getNestedString(
+  object: ComposioResponse,
+  ...paths: string[][]
+): string | null {
+  for (const path of paths) {
+    let current: unknown = object;
+
+    for (const key of path) {
+      if (
+        !current ||
+        typeof current !== "object" ||
+        !(key in current)
+      ) {
+        current = undefined;
+        break;
+      }
+
+      current = (current as Record<string, unknown>)[key];
+    }
+
+    if (typeof current === "string" && current.trim() !== "") {
+      return current;
+    }
+  }
+
+  return null;
+}
+
+export function getComposioClient() {
   return {
     connectedAccounts: {
       /**
-       * Crée une session OAuth Composio.
+       * Crée un lien de session d'authentification OAuth.
        */
       async link(
         userId: string,
         authConfigId: string,
         redirectUri?: string,
       ) {
-        const payload: {
-          user_id: string;
-          auth_config_id: string;
-          callback_url?: string;
-        } = {
+        const payload: Record<string, string> = {
           user_id: userId,
           auth_config_id: authConfigId,
         };
@@ -76,35 +127,45 @@ export function getComposioClient() {
           payload.callback_url = redirectUri;
         }
 
-        const res = await composioFetch("/connected_accounts/link", {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
+        const data = await composioFetch(
+          "/connected_accounts/link",
+          {
+            method: "POST",
+            body: JSON.stringify(payload),
+          },
+        );
 
-        if (!res.ok) {
-          const errorText = await res.text();
-
-          throw new Error(
-            `Composio API error: HTTP ${res.status} - ${errorText}`,
-          );
-        }
-
-        const data = await res.json();
-
+        /**
+         * Composio peut exposer l'URL sous plusieurs formats selon
+         * la version/API utilisée.
+         */
         const redirectUrl =
-          data?.redirect_url ??
-          data?.redirectUrl ??
-          data?.data?.redirect_url ??
-          data?.data?.redirectUrl ??
-          data?.link ??
-          data?.url;
+          getString(
+            data,
+            "redirectUrl",
+            "redirect_url",
+            "link",
+            "url",
+          ) ??
+          getNestedString(
+            data,
+            ["data", "redirectUrl"],
+            ["data", "redirect_url"],
+            ["data", "link"],
+            ["data", "url"],
+          );
 
         const connectedAccountId =
-          data?.connected_account_id ??
-          data?.connectedAccountId ??
-          data?.data?.connected_account_id ??
-          data?.data?.connectedAccountId ??
-          null;
+          getString(
+            data,
+            "connectedAccountId",
+            "connected_account_id",
+          ) ??
+          getNestedString(
+            data,
+            ["data", "connectedAccountId"],
+            ["data", "connected_account_id"],
+          );
 
         if (!redirectUrl) {
           throw new Error(
@@ -119,34 +180,19 @@ export function getComposioClient() {
       },
 
       /**
-       * Liste les comptes connectés pour un utilisateur Kloyya.
+       * Récupère les comptes connectés pour un workspace.
        *
-       * IMPORTANT :
-       * Le compte Composio est créé avec user_id.
-       * On doit donc utiliser user_ids ici et non entity_id=workspace:...
+       * Le backend Kloyya utilise ici l'entity_id associée au workspace.
        */
-      async getConnectedAccounts(userId: string) {
-        const params = new URLSearchParams();
-
-        params.set("user_ids", userId);
-        params.set("limit", "100");
-
-        const res = await composioFetch(
-          `/connected_accounts?${params.toString()}`,
+      async getConnectedAccounts(workspaceId: string) {
+        return composioFetch(
+          `/connected_accounts?entity_id=${encodeURIComponent(
+            `workspace:${workspaceId}`,
+          )}`,
+          {
+            method: "GET",
+          },
         );
-
-        if (!res.ok) {
-          const errorText = await res.text();
-
-          throw new Error(
-            `Composio API error fetching accounts: HTTP ${res.status} - ${errorText}`,
-          );
-        }
-
-        const data =
-          (await res.json()) as ComposioConnectedAccountsResponse;
-
-        return Array.isArray(data?.items) ? data.items : [];
       },
     },
   };
