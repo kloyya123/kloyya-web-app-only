@@ -1,21 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { toast } from '@/components/ui'; // Adaptez le chemin de votre composant toast
+import { useEffect } from 'react';
+import { toast } from '@/components/ui';
 import { IntegrationCard } from '@/features/settings/components/integration-card';
 import { Mail, MessageSquare, FileText } from 'lucide-react';
 
 export default function ConnectionsPage() {
-  const [isSuccess, setIsSuccess] = useState(false);
-
   useEffect(() => {
-    // Vérifier si l'URL contient le paramètre de succès de Composio
     const searchParams = new URLSearchParams(window.location.search);
     if (searchParams.get('status') === 'success') {
-      setIsSuccess(true);
-      toast.success('Connexion réussie ! L\'intégration est maintenant active.');
-      
-      // Nettoyer l'URL pour enlever les paramètres de requête
+      toast.success('Connexion réussie ! L&apos;intégration est maintenant active.');
       window.history.replaceState({}, document.title, window.location.pathname);
     } else if (searchParams.get('status') === 'failed') {
       toast.error('La connexion a échoué. Veuillez réessayer.');
@@ -28,7 +22,7 @@ export default function ConnectionsPage() {
       <div>
         <h1 className="text-heading-l text-foreground font-semibold">Connexions</h1>
         <p className="text-body text-muted-foreground">
-          Connectez vos outils pour alimenter l'intelligence de Kloyya.
+          Connectez vos outils pour alimenter l&apos;intelligence de Kloyya.
         </p>
       </div>
       
@@ -42,7 +36,7 @@ export default function ConnectionsPage() {
         <IntegrationCard 
           appName="slack" 
           displayName="Slack" 
-          description="Synchronisez vos canaux pour comprendre les dynamiques d'équipe et les décisions."
+          description="Synchronisez vos canaux pour comprendre les dynamiques d&apos;équipe et les décisions."
           icon={<MessageSquare className="size-6" />}
         />
         <IntegrationCard 
