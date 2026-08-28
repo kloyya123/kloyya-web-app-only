@@ -6,6 +6,8 @@ import { getComposioClient } from '@/server/integrations/composio-client';
 import { db } from '@kloyya/db';
 import { resolveStartContext } from '@/server/tenant';
 
+export const maxDuration = 60;
+
 const AUTH_CONFIG_IDS: Record<string, string | undefined> = {
   gmail: process.env.COMPOSIO_GMAIL_AUTH_CONFIG_ID,
   slack: process.env.COMPOSIO_SLACK_AUTH_CONFIG_ID,
