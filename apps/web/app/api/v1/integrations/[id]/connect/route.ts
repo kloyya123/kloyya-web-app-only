@@ -70,10 +70,15 @@ export async function POST(
     });
 
     const composio = getComposioClient();
+    
+    // Définit l'URL vers laquelle l'utilisateur sera redirigé après succès
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.kloyya.com';
+    const redirectUri = `${appUrl}/dashboard`; // Tu peux changer '/dashboard' en '/connections' si tu préfères
 
     const connectionRequest = await composio.connectedAccounts.link(
       user.id,
-      authConfigId
+      authConfigId,
+      redirectUri
     );
 
     return NextResponse.json({
