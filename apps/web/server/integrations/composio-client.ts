@@ -20,9 +20,9 @@ export function getComposioClient() {
           auth_config_id: authConfigId,
         };
 
-        // Ajoute l'URI de redirection si fournie
+        // Ajoute l'URL de callback si fournie (le champ API v3 s'appelle "callback_url", pas "redirect_uri")
         if (redirectUri) {
-          payload.redirect_uri = redirectUri;
+          payload.callback_url = redirectUri;
         }
 
         const res = await fetch(`${COMPOSIO_BASE_URL}/connected_accounts/link`, {
