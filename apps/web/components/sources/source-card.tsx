@@ -75,51 +75,51 @@ export function SourceCard({ source }: { source: ConnectedSource }) {
 
         <div>
           {isConnected ? (
-            <div className="flex items-center gap-3">
-              <Image
-                src="/images/connected-badge.gif"
-                alt="Connecté"
-                width={24}
-                height={24}
-                className="h-6 w-6 rounded-sm"
-                unoptimized
-              />
+  <div className="flex items-center gap-3">
+    <Image
+      src="/images/connected-badge.gif"
+      alt="Connecté"
+      width={24}
+      height={24}
+      className="h-6 w-6 rounded-sm"
+      unoptimized
+    />
 
-              <Badge tone={status.tone} withDot>
-                Connecté
-              </Badge>
+    <Badge tone={status.tone} withDot>
+      Connecté
+    </Badge>
 
-              <button
-                type="button"
-                onClick={handleDisconnect}
-                disabled={isActioning}
-                className="ml-2 inline-flex items-center rounded-md border px-2 py-1 text-sm text-foreground disabled:opacity-50"
-              >
-                {isActioning ? 'Déconnexion…' : 'Déconnecter'}
-              </button>
-            </div>
-          ) : source.status === 'syncing' ? (
-            <Badge tone="accent" withDot>
-              Synchronisation…
-            </Badge>
-          ) : source.status === 'needs_attention' ? (
-            <Badge tone="warning" withDot>
-              Attention requise
-            </Badge>
-          ) : source.status === 'token_expired' ? (
-            <Badge tone="warning" withDot>
-              Session expirée
-            </Badge>
-          ) : (
-            <button
-              type="button"
-              onClick={handleConnect}
-              disabled={isActioning}
-              className="inline-flex items-center rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-            >
-              {isActioning ? 'Connexion…' : 'Connecter'}
-            </button>
-          )}
+    <button
+      type="button"
+      onClick={handleDisconnect}
+      disabled={isActioning}
+      className="ml-2 inline-flex items-center rounded-md border px-2 py-1 text-sm text-foreground disabled:opacity-50"
+    >
+      {isActioning ? 'Déconnexion…' : 'Déconnecter'}
+    </button>
+  </div>
+) : source.status === 'syncing' ? (
+  <Badge tone="info" withDot>
+    Synchronisation…
+  </Badge>
+) : source.status === 'needs_attention' ? (
+  <Badge tone="warning" withDot>
+    Attention requise
+  </Badge>
+) : source.status === 'token_expired' ? (
+  <Badge tone="warning" withDot>
+    Session expirée
+  </Badge>
+) : (
+  <button
+    type="button"
+    onClick={handleConnect}
+    disabled={isActioning}
+    className="inline-flex items-center rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+  >
+    {isActioning ? 'Connexion…' : 'Connecter'}
+  </button>
+)}
         </div>
       </div>
 
