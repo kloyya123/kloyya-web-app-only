@@ -23,16 +23,25 @@ export function IntegrationCard({ appName, displayName, description, icon }: Int
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.details || errorData.error || `Erreur serveur (${response.status})`);
+        let errorData: Record<string, unknown> = {};
+        try {
+          errorData = await response.json();
+        } catch (e) {
+          // Ignorer si la réponse n'est pas du JSON valide
+        }
+        
+        const errorMsg = 
+          (typeof errorData.details === 'string' ? errorData.details : null) || 
+          (typeof errorData.error === 'string' ? errorData.error : null) || 
+          `Erreur serveur (${response.status})`;
+          
+        throw new Error(errorMsg);
       }
 
       const data = await response.json();
 
       if (data.redirectUrl) {
-        // ✅ CORRECTION CRUCIALE : 
-        // On force une redirection pleine page. 
-        // NE PAS utiliser de modal, de dialog ou d'iframe pour cette URL.
+        // ✅ Redirection pleine page (évite le blocage CSP iframe)
         window.location.href = data.redirectUrl;
       } else {
         throw new Error("Aucune URL de redirection fournie par le serveur.");
@@ -41,7 +50,7 @@ export function IntegrationCard({ appName, displayName, description, icon }: Int
       const errorMessage = error instanceof Error ? error.message : "Une erreur inattendue est survenue.";
       console.error('[Integration Connect Error]:', error);
       toast.error(errorMessage);
-      setIsConnecting(false); // On ne réinitialise que si ça échoue, sinon la page change
+      setIsConnecting(false); // On réinitialise seulement si ça échoue
     }
   }
 
@@ -56,10 +65,12 @@ export function IntegrationCard({ appName, displayName, description, icon }: Int
       </div>
       <Button 
         onClick={handleConnect} 
-        disabled={isConnecting} // Utilise 'disabled' au lieu de 'isDisabled' selon ta lib de UI
+        isDisabled={isConnecting} // ✅ CORRECTION : isDisabled au lieu de disabled
+        isLoading={isConnecting}  // ✅ CORRECTION : isLoading pour le spinner intégré
+        loadingLabel="Connexion..."
         variant="outline"
       >
-        {isConnecting ? <Loader2 className="size-4 animate-spin" /> : <ExternalLink className="size-4" />}
+        {isConnecting ? null : <ExternalLink className="size-4" />}
         <span className="ml-2">Connecter</span>
       </Button>
     </div>
