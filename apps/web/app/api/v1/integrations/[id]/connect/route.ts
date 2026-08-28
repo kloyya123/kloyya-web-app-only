@@ -19,74 +19,46 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-
     const appName = id.toLowerCase();
 
     if (!appName) {
-      return NextResponse.json(
-        { error: 'Integration ID is required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Integration ID is required' }, { status: 400 });
     }
 
     const authConfigId = AUTH_CONFIG_IDS[appName];
 
     if (!authConfigId) {
-      console.error(
-        `[Composio Connect] Missing auth config for integration: ${appName}`
-      );
-
+      console.error(`[Composio Connect] Missing auth config for integration: ${appName}`);
       return NextResponse.json(
-        {
-          error: `No Composio auth config configured for ${appName}`,
-        },
+        { error: `No Composio auth config configured for ${appName}` },
         { status: 500 }
       );
     }
 
     const cookieStore = await cookies();
-
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
         cookies: {
-          getAll() {
-            return cookieStore.getAll();
-          },
+          getAll() { return cookieStore.getAll(); },
           setAll() {},
         },
       }
     );
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
 
     if (userError || !user) {
-      console.error(
-        '[Composio Connect] Unauthorized:',
-        userError
-      );
-
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+      console.error('[Composio Connect] Unauthorized:', userError);
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const ctx = await resolveStartContext(db, user.id);
 
     if (!ctx?.organizationId || !ctx?.workspaceId) {
-      console.error(
-        '[Composio Connect] User profile incomplete'
-      );
-
-      return NextResponse.json(
-        { error: 'User profile incomplete' },
-        { status: 400 }
-      );
+      console.error('[Composio Connect] User profile incomplete');
+      return NextResponse.json({ error: 'User profile incomplete' }, { status: 400 });
     }
 
     console.warn('[Composio Connect] Initiating OAuth', {
@@ -97,38 +69,23 @@ export async function POST(
 
     const composio = getComposioClient();
 
-    /*
-     * Composio-managed OAuth:
-     * use connectedAccounts.link()
-     *
-     * This requires:
-     * - userId
-     * - authConfigId
-     */
-    const connectionRequest =
-      await composio.connectedAccounts.link(
-        user.id,
-        authConfigId
-      );
+    const connectionRequest = await composio.connectedAccounts.link(
+      user.id,
+      authConfigId
+    );
 
     return NextResponse.json({
       redirectUrl: connectionRequest.redirectUrl,
-      connectedAccountId:
-        connectionRequest.connectedAccountId,
+      connectedAccountId: connectionRequest.connectedAccountId,
     });
+
   } catch (error) {
-    console.error(
-      '[Composio Connect Error] CRITICAL:',
-      error
-    );
+    console.error('[Composio Connect Error] CRITICAL:', error);
 
     return NextResponse.json(
       {
         error: 'Internal Server Error',
-        details:
-          error instanceof Error
-            ? error.message
-            : String(error),
+        details: error instanceof Error ? error.message : String(error),
       },
       { status: 500 }
     );
