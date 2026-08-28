@@ -1,3 +1,4 @@
+
 import type {
   IntegrationCategory,
   IntegrationDefinition,
@@ -5,26 +6,25 @@ import type {
 } from './integrations.js';
 
 /**
- * The integration catalogue — PRIVATE BETA.
+ * Kloyya integration catalogue.
  *
- * A small set, not fifty. Kloyya Core Integrations (Private Beta) picks the
- * tools that carry the most context per connection — email, calendar, the two
- * places documents live, and team chat.
- *
- * WhatsApp Business is deliberately ABSENT despite being a headline beta
- * integration: the WhatsApp Cloud API cannot read message history at all.
- * Messages arrive only by webhook, forward-only, from the moment you connect.
- *
- * The rest of the long tail is documented as a post-beta expansion.
- *
- * This is product configuration, not mock data, which is why it lives in
- * @kloyya/core rather than the web app's mock folder.
+ * This catalogue is the product-level source of truth for the Connections
+ * Manager. Authentication/provider configuration is deliberately kept outside
+ * Core and handled by the web integration layer (Composio).
  */
 
 const PERMISSIONS: Record<IntegrationCategory, IntegrationPermissions> = {
   communication: {
-    granted: ['Read messages', 'Read threads', 'Read attachments'],
-    notGranted: ['Send messages', 'Delete messages', 'Share data externally'],
+    granted: [
+      'Read messages',
+      'Read threads',
+      'Read attachments',
+    ],
+    notGranted: [
+      'Send messages',
+      'Delete messages',
+      'Share data externally',
+    ],
   },
 
   calendar: {
@@ -55,7 +55,11 @@ const PERMISSIONS: Record<IntegrationCategory, IntegrationPermissions> = {
   },
 
   project_management: {
-    granted: ['Read projects', 'Read tasks', 'Read comments'],
+    granted: [
+      'Read projects',
+      'Read tasks',
+      'Read comments',
+    ],
     notGranted: [
       'Edit tasks',
       'Delete items',
@@ -90,7 +94,10 @@ const PERMISSIONS: Record<IntegrationCategory, IntegrationPermissions> = {
   },
 
   design: {
-    granted: ['Read files', 'Read comments'],
+    granted: [
+      'Read files',
+      'Read comments',
+    ],
     notGranted: [
       'Edit designs',
       'Share data externally',
@@ -111,7 +118,10 @@ const PERMISSIONS: Record<IntegrationCategory, IntegrationPermissions> = {
   },
 
   finance: {
-    granted: ['Read invoices', 'Read transactions'],
+    granted: [
+      'Read invoices',
+      'Read transactions',
+    ],
     notGranted: [
       'Create payments',
       'Edit records',
@@ -120,7 +130,10 @@ const PERMISSIONS: Record<IntegrationCategory, IntegrationPermissions> = {
   },
 
   cloud_storage: {
-    granted: ['Read objects', 'Read metadata'],
+    granted: [
+      'Read objects',
+      'Read metadata',
+    ],
     notGranted: [
       'Write objects',
       'Delete objects',
@@ -129,7 +142,9 @@ const PERMISSIONS: Record<IntegrationCategory, IntegrationPermissions> = {
   },
 
   ai_productivity: {
-    granted: ['Read conversations you choose to share'],
+    granted: [
+      'Read conversations you choose to share',
+    ],
     notGranted: [
       'Send prompts on your behalf',
       'Share data externally',
@@ -137,7 +152,10 @@ const PERMISSIONS: Record<IntegrationCategory, IntegrationPermissions> = {
   },
 
   hr: {
-    granted: ['Read directory', 'Read org structure'],
+    granted: [
+      'Read directory',
+      'Read org structure',
+    ],
     notGranted: [
       'Edit employee data',
       'Share data externally',
@@ -145,7 +163,10 @@ const PERMISSIONS: Record<IntegrationCategory, IntegrationPermissions> = {
   },
 
   marketing: {
-    granted: ['Read campaigns', 'Read performance metrics'],
+    granted: [
+      'Read campaigns',
+      'Read performance metrics',
+    ],
     notGranted: [
       'Send campaigns',
       'Edit audiences',
@@ -154,7 +175,9 @@ const PERMISSIONS: Record<IntegrationCategory, IntegrationPermissions> = {
   },
 
   custom: {
-    granted: ['Read the endpoints you approve'],
+    granted: [
+      'Read the endpoints you approve',
+    ],
     notGranted: [
       'Write operations unless explicitly granted',
       'Share data externally',
@@ -162,12 +185,6 @@ const PERMISSIONS: Record<IntegrationCategory, IntegrationPermissions> = {
   },
 };
 
-/**
- * Create one catalogue definition.
- *
- * The icon is part of the integration definition so the Connections Manager
- * has one source of truth for the integration identity and presentation.
- */
 function define(
   id: string,
   name: string,
@@ -188,60 +205,297 @@ function define(
 }
 
 export const INTEGRATION_CATALOG: IntegrationDefinition[] = [
-  // Email.
+  // ---------------------------------------------------------------------------
+  // COMMUNICATION
+  // ---------------------------------------------------------------------------
+
   define(
     'gmail',
     'Gmail',
     'communication',
-    'Understands your email threads, priorities, and follow-ups.',
+    'Understands your email threads, priorities, follow-ups, and communication history.',
     12,
     '/icons/gmail.svg',
   ),
 
-  // Calendar.
+  define(
+    'slack',
+    'Slack',
+    'communication',
+    'Reads the conversations and threads Kloyya is invited to so important decisions are not lost.',
+    10,
+    '/icons/slack.svg',
+  ),
+
+  define(
+    'whatsapp',
+    'WhatsApp',
+    'communication',
+    'Connects approved WhatsApp business conversations and customer communication.',
+    15,
+    '/icons/whatsapp.svg',
+  ),
+
+  define(
+    'outlook',
+    'Outlook',
+    'communication',
+    'Understands your Outlook email, threads, and communication history.',
+    12,
+    '/icons/outlook.svg',
+  ),
+
+  define(
+    'microsoft_teams',
+    'Microsoft Teams',
+    'communication',
+    'Reads approved Teams conversations and threads so decisions remain available to Kloyya.',
+    10,
+    '/icons/microsoft-teams.svg',
+  ),
+
+  // ---------------------------------------------------------------------------
+  // CALENDAR
+  // ---------------------------------------------------------------------------
+
   define(
     'google_calendar',
     'Google Calendar',
     'calendar',
-    'Knows your schedule, attendees, and preparation windows.',
+    'Knows your schedule, attendees, preparation windows, and upcoming commitments.',
     3,
     '/icons/google-calendar.svg',
   ),
 
-  // Documents & knowledge.
+  // ---------------------------------------------------------------------------
+  // DOCUMENTS & KNOWLEDGE
+  // ---------------------------------------------------------------------------
+
   define(
     'google_drive',
     'Google Drive',
     'documents',
-    'Indexes the documents your decisions depend on.',
+    'Indexes the documents and folders your decisions depend on.',
     25,
     '/icons/google-drive.svg',
+  ),
+
+  define(
+    'google_sheets',
+    'Google Sheets',
+    'documents',
+    'Understands approved spreadsheets, tables, and operational data.',
+    20,
+    '/icons/google-sheets.svg',
+  ),
+
+  define(
+    'google_docs',
+    'Google Docs',
+    'documents',
+    'Reads approved documents and turns organizational knowledge into usable context.',
+    15,
+    '/icons/google-docs.svg',
   ),
 
   define(
     'notion',
     'Notion',
     'documents',
-    'Turns your workspace pages into organizational memory.',
+    'Turns your workspace pages and knowledge base into organizational memory.',
     15,
     '/icons/notion.svg',
   ),
 
-  // Team chat.
   define(
-    'slack',
-    'Slack',
-    'communication',
-    'Reads the channels it is invited into, so decisions made in chat are not lost to it.',
-    10,
-    '/icons/slack.svg',
+    'airtable',
+    'Airtable',
+    'documents',
+    'Understands structured workspace data stored in approved Airtable bases.',
+    20,
+    '/icons/airtable.svg',
+  ),
+
+  define(
+    'onedrive',
+    'OneDrive',
+    'cloud_storage',
+    'Indexes approved files and folders stored in Microsoft OneDrive.',
+    25,
+    '/icons/onedrive.svg',
+  ),
+
+  // ---------------------------------------------------------------------------
+  // PRODUCTIVITY
+  // ---------------------------------------------------------------------------
+
+  define(
+    'google_tasks',
+    'Google Tasks',
+    'project_management',
+    'Understands personal and operational tasks managed through Google Tasks.',
+    5,
+    '/icons/google-tasks.svg',
+  ),
+
+  define(
+    'todoist',
+    'Todoist',
+    'project_management',
+    'Understands tasks, priorities, projects, and follow-ups managed in Todoist.',
+    8,
+    '/icons/todoist.svg',
+  ),
+
+  define(
+    'clickup',
+    'ClickUp',
+    'project_management',
+    'Reads approved projects, tasks, comments, and operational planning.',
+    15,
+    '/icons/clickup.svg',
+  ),
+
+  // ---------------------------------------------------------------------------
+  // CRM
+  // ---------------------------------------------------------------------------
+
+  define(
+    'hubspot',
+    'HubSpot',
+    'crm',
+    'Understands approved contacts, deals, activities, and customer history.',
+    20,
+    '/icons/hubspot.svg',
+  ),
+
+  define(
+    'salesforce',
+    'Salesforce',
+    'crm',
+    'Understands approved customer records, opportunities, and activity history.',
+    25,
+    '/icons/salesforce.svg',
+  ),
+
+  define(
+    'pipedrive',
+    'Pipedrive',
+    'crm',
+    'Understands sales pipelines, deals, contacts, and commercial activity.',
+    15,
+    '/icons/pipedrive.svg',
+  ),
+
+  define(
+    'zoho',
+    'Zoho',
+    'crm',
+    'Understands approved customer records, deals, and business activity in Zoho.',
+    20,
+    '/icons/zoho.svg',
+  ),
+
+  define(
+    'odoo',
+    'Odoo',
+    'crm',
+    'Connects approved business records and operational information from Odoo.',
+    25,
+    '/icons/odoo.svg',
+  ),
+
+  // ---------------------------------------------------------------------------
+  // SOCIAL & MARKETING
+  // ---------------------------------------------------------------------------
+
+  define(
+    'instagram',
+    'Instagram',
+    'marketing',
+    'Understands approved Instagram content, account activity, and performance signals.',
+    15,
+    '/icons/instagram.svg',
+  ),
+
+  define(
+    'facebook',
+    'Facebook',
+    'marketing',
+    'Understands approved Facebook pages, content activity, and performance signals.',
+    15,
+    '/icons/facebook.svg',
+  ),
+
+  define(
+    'linkedin',
+    'LinkedIn',
+    'marketing',
+    'Understands approved LinkedIn activity, content, and professional audience signals.',
+    15,
+    '/icons/linkedin.svg',
+  ),
+
+  define(
+    'meta_ads',
+    'Meta Ads',
+    'marketing',
+    'Understands approved advertising campaigns, performance, and marketing metrics.',
+    15,
+    '/icons/meta-ads.svg',
+  ),
+
+  define(
+    'mailchimp',
+    'Mailchimp',
+    'marketing',
+    'Understands approved email campaigns, performance metrics, and audience activity.',
+    15,
+    '/icons/mailchimp.svg',
+  ),
+
+  // ---------------------------------------------------------------------------
+  // COMMERCE & DESIGN
+  // ---------------------------------------------------------------------------
+
+  define(
+    'shopify',
+    'Shopify',
+    'finance',
+    'Understands approved store activity, orders, and commercial performance data.',
+    20,
+    '/icons/shopify.svg',
+  ),
+
+  define(
+    'canva',
+    'Canva',
+    'design',
+    'Reads approved designs and comments so Kloyya can understand the visual work behind decisions.',
+    15,
+    '/icons/canva.svg',
+  ),
+
+  // ---------------------------------------------------------------------------
+  // MEETINGS
+  // ---------------------------------------------------------------------------
+
+  define(
+    'zoom',
+    'Zoom',
+    'meetings',
+    'Understands approved meetings, recordings, and transcripts.',
+    15,
+    '/icons/zoom.svg',
+  ),
+
+  define(
+    'google_meet',
+    'Google Meet',
+    'meetings',
+    'Understands approved meeting recordings, transcripts, and meeting context.',
+    15,
+    '/icons/google-meets.svg',
   ),
 ];
 
-/**
- * Which integrations Northwind already has connected.
- *
- * This constant is intentionally kept compatible with the existing beta
- * service and tests. It can be expanded when the real connection catalogue
- * grows.
- */
