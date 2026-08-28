@@ -1,6 +1,6 @@
 /**
  * Client Composio utilisant l'API v3 officielle.
- * Gère plusieurs formats de réponse possibles de l'API.
+ * Supporte désormais la redirection automatique après succès.
  */
 
 const COMPOSIO_BASE_URL = 'https://backend.composio.dev/api/v3';
@@ -14,17 +14,24 @@ export function getComposioClient() {
 
   return {
     connectedAccounts: {
-      async link(userId: string, authConfigId: string) {
+      async link(userId: string, authConfigId: string, redirectUri?: string) {
+        const payload: any = {
+          user_id: userId,
+          auth_config_id: authConfigId,
+        };
+
+        // Ajoute l'URI de redirection si fournie
+        if (redirectUri) {
+          payload.redirect_uri = redirectUri;
+        }
+
         const res = await fetch(`${COMPOSIO_BASE_URL}/connected_accounts/link`, {
           method: 'POST',
           headers: {
             'x-api-key': apiKey,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            user_id: userId,
-            auth_config_id: authConfigId,
-          }),
+          body: JSON.stringify(payload),
         });
 
         if (!res.ok) {
@@ -34,11 +41,8 @@ export function getComposioClient() {
 
         const data = await res.json();
 
-        // Log pour voir exactement ce que Composio renvoie
-        console.warn('[Composio Link Response]', JSON.stringify(data, null, 2));
-
-        // Gestion de plusieurs formats de réponse possibles
-        const redirectUrl = 
+        // Gestion robuste des différents formats de réponse
+        const finalRedirectUrl = 
           data.redirectUrl || 
           data.redirect_url || 
           data.data?.redirectUrl || 
@@ -53,12 +57,12 @@ export function getComposioClient() {
           data.data?.connected_account_id ||
           null;
 
-        if (!redirectUrl) {
+        if (!finalRedirectUrl) {
           throw new Error(`Composio returned no redirect URL. Response: ${JSON.stringify(data)}`);
         }
 
         return {
-          redirectUrl,
+          redirectUrl: finalRedirectUrl,
           connectedAccountId,
         };
       },
