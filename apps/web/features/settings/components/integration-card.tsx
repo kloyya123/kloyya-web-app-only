@@ -4,64 +4,61 @@ import { useState } from 'react';
 import { Button, toast } from '@/components/ui';
 import { ExternalLink, Loader2 } from 'lucide-react';
 
-export function IntegrationCard({ appName, displayName, description, icon }: any) {
+interface IntegrationCardProps {
+  appName: string;
+  displayName: string;
+  description: string;
+  icon: React.ReactNode;
+}
+
+export function IntegrationCard({ appName, displayName, description, icon }: IntegrationCardProps) {
   const [isConnecting, setIsConnecting] = useState(false);
 
   async function handleConnect() {
     setIsConnecting(true);
     try {
-      const res = await fetch(`/api/v1/integrations/${appName}/connect`, { 
+      const response = await fetch(`/api/v1/integrations/${appName}/connect`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
       });
-      
-      // On essaie de lire le JSON, mais si le serveur plante en HTML (erreur 500 brute), on ne plante pas
-      let data: any = {};
-      try {
-        data = await res.json();
-      } catch (e) {
-        data = { error: `Le serveur a répondu avec le statut ${res.status} mais pas de JSON valide.` };
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.details || errorData.error || `Erreur serveur (${response.status})`);
       }
 
-      if (!res.ok) {
-        throw new Error(data.details || data.error || `Erreur serveur (${res.status})`);
-      }
+      const data = await response.json();
 
       if (data.redirectUrl) {
+        // ✅ CORRECTION CRUCIALE : 
+        // On force une redirection pleine page. 
+        // NE PAS utiliser de modal, de dialog ou d'iframe pour cette URL.
         window.location.href = data.redirectUrl;
       } else {
-        throw new Error('Pas d\'URL de redirection fournie.');
+        throw new Error("Aucune URL de redirection fournie par le serveur.");
       }
-
-    } catch (err: unknown) {
-      // ✅ SÉCURITÉ ABSOLUE : Extraction du message sans JAMAIS faire .message directement
-      let errorMsg = 'Une erreur inconnue est survenue.';
-      
-      if (err instanceof Error) {
-        errorMsg = err.message;
-      } else if (typeof err === 'string') {
-        errorMsg = err;
-      } else if (err && typeof err === 'object') {
-        errorMsg = JSON.stringify(err);
-      }
-
-      // On affiche la vérité brute dans la console pour qu'on sache exactement ce qui se passe
-      console.error('🚨 RAW ERROR OBJECT FROM CATCH:', err);
-      
-      toast.error(errorMsg);
-    } finally {
-      setIsConnecting(false);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Une erreur inattendue est survenue.";
+      console.error('[Integration Connect Error]:', error);
+      toast.error(errorMessage);
+      setIsConnecting(false); // On ne réinitialise que si ça échoue, sinon la page change
     }
   }
 
   return (
-    <div className="border p-4 rounded-lg flex items-center gap-4 bg-surface border-border">
-      <div className="p-2 bg-muted rounded text-foreground">{icon}</div>
-      <div className="flex-1">
-        <h3 className="font-semibold text-foreground text-body">{displayName}</h3>
-        <p className="text-sm text-muted-foreground">{description}</p>
+    <div className="border-border bg-surface rounded-lg border p-4 flex items-start gap-4">
+      <div className="bg-muted rounded-md p-2 text-foreground">
+        {icon}
       </div>
-      <Button onClick={handleConnect} isDisabled={isConnecting} isLoading={isConnecting} variant="outline">
+      <div className="flex-1 space-y-1">
+        <h3 className="text-body text-foreground font-semibold">{displayName}</h3>
+        <p className="text-small text-muted-foreground">{description}</p>
+      </div>
+      <Button 
+        onClick={handleConnect} 
+        disabled={isConnecting} // Utilise 'disabled' au lieu de 'isDisabled' selon ta lib de UI
+        variant="outline"
+      >
         {isConnecting ? <Loader2 className="size-4 animate-spin" /> : <ExternalLink className="size-4" />}
         <span className="ml-2">Connecter</span>
       </Button>
