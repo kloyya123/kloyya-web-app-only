@@ -1,6 +1,6 @@
 /**
  * Client Composio utilisant l'API v3 officielle.
- * Fournit l'interface attendue par la route d'intégration.
+ * Gère plusieurs formats de réponse possibles de l'API.
  */
 
 const COMPOSIO_BASE_URL = 'https://backend.composio.dev/api/v3';
@@ -14,11 +14,6 @@ export function getComposioClient() {
 
   return {
     connectedAccounts: {
-      /**
-       * Crée un lien de session d'authentification (Composio-managed OAuth)
-       * @param userId L'ID de l'utilisateur dans ton système (Supabase)
-       * @param authConfigId L'ID de la configuration d'authentification dans Composio
-       */
       async link(userId: string, authConfigId: string) {
         const res = await fetch(`${COMPOSIO_BASE_URL}/connected_accounts/link`, {
           method: 'POST',
@@ -39,9 +34,32 @@ export function getComposioClient() {
 
         const data = await res.json();
 
+        // Log pour voir exactement ce que Composio renvoie
+        console.warn('[Composio Link Response]', JSON.stringify(data, null, 2));
+
+        // Gestion de plusieurs formats de réponse possibles
+        const redirectUrl = 
+          data.redirectUrl || 
+          data.redirect_url || 
+          data.data?.redirectUrl || 
+          data.data?.redirect_url ||
+          data.link ||
+          data.url;
+
+        const connectedAccountId = 
+          data.connectedAccountId || 
+          data.connected_account_id ||
+          data.data?.connectedAccountId ||
+          data.data?.connected_account_id ||
+          null;
+
+        if (!redirectUrl) {
+          throw new Error(`Composio returned no redirect URL. Response: ${JSON.stringify(data)}`);
+        }
+
         return {
-          redirectUrl: data.redirectUrl,
-          connectedAccountId: data.connectedAccountId || null,
+          redirectUrl,
+          connectedAccountId,
         };
       },
     },
