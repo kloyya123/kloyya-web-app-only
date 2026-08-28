@@ -333,102 +333,154 @@ export default function ConnectionsPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function loadConnections(showRefresh = false) {
-    try {
-      if (showRefresh) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
-
-      setError(null);
-
-      const response = await fetch("/api/v1/integrations", {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-        },
-        cache: "no-store",
-      });
-
-      if (!response.ok) {
-        throw new Error(
-          `Impossible de récupérer les connexions (${response.status})`,
-        );
-      }
-
-      const data = await response.json();
-
-      const remoteConnections: IntegrationConnection[] = Array.isArray(
-        data?.connections,
-      )
-        ? data.connections
-        : Array.isArray(data?.integrations)
-          ? data.integrations
-          : Array.isArray(data?.connectedApps)
-            ? data.connectedApps
-            : [];
-
-      setConnections(mergeConnections(remoteConnections));
-    } catch (err) {
-      console.error("[Connections] load failed:", err);
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Impossible de charger les intégrations.",
-      );
-
-      // Même si l'API est momentanément indisponible,
-      // on affiche le catalogue Kloyya.
-      setConnections(
-        INTEGRATIONS.map((definition) => ({
-          definition,
-          status: "not_connected",
-          lastSyncedAt: null,
-          errorReason: null,
-        })),
-      );
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+async function loadConnections(showRefresh = false) {
+  try {
+    if (showRefresh) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
     }
-  }
 
-  useEffect(() => {
-    void loadConnections();
-  }, []);
+    setError(null);
 
-  const categories = useMemo(() => {
-    const values = connections
-      .map((connection) => connection.definition.category)
-      .filter((value): value is string => Boolean(value));
-
-    return ["Toutes", ...Array.from(new Set(values))];
-  }, [connections]);
-
-  const filteredConnections = useMemo(() => {
-    const query = search.trim().toLowerCase();
-
-    return connections.filter((connection) => {
-      const matchesSearch =
-        !query ||
-        connection.definition.name.toLowerCase().includes(query) ||
-        connection.definition.description?.toLowerCase().includes(query) ||
-        connection.definition.category?.toLowerCase().includes(query);
-
-      const matchesCategory =
-        category === "Toutes" ||
-        connection.definition.category === category;
-
-      return matchesSearch && matchesCategory;
+    const response = await fetch("/api/v1/integrations", {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+      },
+      cache: "no-store",
     });
-  }, [connections, search, category]);
 
-  const connectedCount = connections.filter(
-    (connection) => connection.status === "connected",
-  ).length;
+    if (!response.ok) {
+      throw new Error(
+        `Impossible de récupérer les connexions (${response.status})`,
+      );
+    }
 
-  const availableCount = connections.length - connectedCount;
+    const data = await response.json();
+
+    /**
+     * L'API peut retourner :
+     *
+     * 1. connections: IntegrationConnection[]
+     * 2. integrations: IntegrationConnection[]
+     * 3. connectedApps: string[]
+     *
+     * Le endpoint Composio actuel retourne notamment :
+     * { connectedApps: ["gmail", "slack"] }
+     *
+     * On normalise donc tout ici avant de construire l'état UI.
+     */
+
+    let normalizedConnections: IntegrationConnection[] = [];
+
+    if (Array.isArray(data?.connections)) {
+      normalizedConnections = data.connections;
+    } else if (Array.isArray(data?.integrations)) {
+      normalizedConnections = data.integrations;
+    } else if (Array.isArray(data?.connectedApps)) {
+      const connectedAppIds = new Set(
+        data.connectedApps
+          .filter((value: unknown): value is string => typeof value === "string")
+          .map((value: string) => value.trim().toLowerCase()),
+      );
+
+      normalizedConnections = INTEGRATIONS.map((definition) => {
+        const isConnected = connectedAppIds.has(definition.id.toLowerCase());
+
+        return {
+          definition,
+          status: isConnected ? "connected" : "not_connected",
+          lastSyncedAt: isConnected ? new Date().toISOString() : null,
+          errorReason: null,
+        };
+      });
+    } else {
+      /**
+       * Réponse valide mais vide.
+       * On garde le catalogue et toutes les intégrations sont
+       * considérées comme non connectées.
+       */
+      normalizedConnections = INTEGRATIONS.map((definition) => ({
+        definition,
+        status: "not_connected",
+        lastSyncedAt: null,
+        errorReason: null,
+      }));
+    }
+
+    /**
+     * Important :
+     * mergeConnections conserve les définitions/icônes locales
+     * tout en appliquant le statut réel retourné par le backend.
+     */
+    setConnections(mergeConnections(normalizedConnections));
+  } catch (err) {
+    console.error("[Connections] load failed:", err);
+
+    setError(
+      err instanceof Error
+        ? err.message
+        : "Impossible de charger les intégrations.",
+    );
+
+    /**
+     * En cas d'erreur réseau/API, on affiche quand même le catalogue.
+     * On ne prétend PAS qu'une intégration est connectée.
+     */
+    setConnections(
+      INTEGRATIONS.map((definition) => ({
+        definition,
+        status: "not_connected",
+        lastSyncedAt: null,
+        errorReason: null,
+      })),
+    );
+  } finally {
+    setLoading(false);
+    setRefreshing(false);
+  }
+}
+
+useEffect(() => {
+  void loadConnections();
+}, []);
+
+const categories = useMemo(() => {
+  const values = connections
+    .map((connection) => connection.definition.category)
+    .filter((value): value is string => Boolean(value));
+
+  return ["Toutes", ...Array.from(new Set(values))];
+}, [connections]);
+
+const filteredConnections = useMemo(() => {
+  const query = search.trim().toLowerCase();
+
+  return connections.filter((connection) => {
+    const matchesSearch =
+      !query ||
+      connection.definition.name.toLowerCase().includes(query) ||
+      connection.definition.description?.toLowerCase().includes(query) ||
+      connection.definition.category?.toLowerCase().includes(query);
+
+    const matchesCategory =
+      category === "Toutes" ||
+      connection.definition.category === category;
+
+    return matchesSearch && matchesCategory;
+  });
+}, [connections, search, category]);
+
+const connectedCount = connections.filter(
+  (connection) => connection.status === "connected",
+).length;
+
+const availableCount = Math.max(
+  0,
+  connections.length - connectedCount,
+);
+
 
   async function handleConnect(id: string) {
     try {
