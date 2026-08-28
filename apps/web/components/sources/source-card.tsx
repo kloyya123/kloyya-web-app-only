@@ -7,34 +7,32 @@ import { cn } from '@/lib/cn';
 import { formatRelativeTime } from '@/lib/format';
 import type { ConnectedSource } from '@/types/sources';
 import { PERMISSION_LABEL, STATUS_META, providerIcon } from './source-meta';
-import { useQueryClient } from '@tanstack/react-query';
-import { services } from '@/services';
+import { useIntegrationsActions } from '@/hooks/use-integrations-actions';
 
 /**
  * One connected source, with everything the spec's "Source Confidence &
  * Freshness" panel wants: confidence, last-updated, permission, status, and how
  * many recommendations lean on it.
+ *
+ * Note: this UI component does NOT call services directly — it uses a hook.
  */
 export function SourceCard({ source }: { source: ConnectedSource }) {
   const Icon = providerIcon(source.provider);
   const status = STATUS_META[source.status];
-  const qc = useQueryClient();
+  const { connect, disconnect } = useIntegrationsActions();
   const [isActioning, setIsActioning] = useState(false);
 
   async function handleConnect() {
     setIsActioning(true);
     try {
-      // Real flow will redirect the browser to the provider (OAuth) and navigation
-      // means this promise may never resolve. That's expected. For mocks this will
-      // return the updated connection object.
-      await services.integrations.connect(source.definition.id);
-      // For mock / SSR test paths, ensure UI is refreshed:
-      qc.invalidateQueries(['integrations', 'summary']);
-      qc.invalidateQueries(['integrations', source.definition.id]);
-    } catch (err) {
-      // If OAuth navigation happened, this code will not run. For client-side
-      // errors, surface to console (or replace with toast).
-      // console.error('Connect failed', err);
+      await connect(source.definition.id);
+      // For OAuth flows this will typically navigate away; when it returns the
+      // callback page will invalidate caches. For mocks it resolves here and
+      // the hook already invalidates caches.
+    } catch (error) {
+      // surface or log the error for debugging
+      // eslint-disable-next-line no-console
+      console.error('Connect error', error);
     } finally {
       setIsActioning(false);
     }
@@ -43,11 +41,10 @@ export function SourceCard({ source }: { source: ConnectedSource }) {
   async function handleDisconnect() {
     setIsActioning(true);
     try {
-      await services.integrations.disconnect(source.definition.id);
-      qc.invalidateQueries(['integrations', 'summary']);
-      qc.invalidateQueries(['integrations', source.definition.id]);
-    } catch (err) {
-      // console.error('Disconnect failed', err);
+      await disconnect(source.definition.id);
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Disconnect error', error);
     } finally {
       setIsActioning(false);
     }
@@ -76,7 +73,7 @@ export function SourceCard({ source }: { source: ConnectedSource }) {
         {/* Status / action area */}
         <div>
           {source.status === 'connected' ? (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               {/* Put your GIF in public/images/connected-badge.gif */}
               <img
                 src="/images/connected-badge.gif"
@@ -88,6 +85,15 @@ export function SourceCard({ source }: { source: ConnectedSource }) {
               <Badge tone={status.tone} withDot>
                 Connecté
               </Badge>
+
+              <button
+                type="button"
+                onClick={handleDisconnect}
+                disabled={isActioning}
+                className="ml-2 inline-flex items-center rounded-md border px-2 py-1 text-sm text-foreground disabled:opacity-50"
+              >
+                Déconnecter
+              </button>
             </div>
           ) : source.status === 'syncing' ? (
             <Badge tone="accent" withDot>
