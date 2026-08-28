@@ -103,7 +103,7 @@ export async function initiateComposioConnection(
   }
 
   // 1. Vérifier la clé
-  await verifyApiKey(apikKey);
+  await verifyApiKey(apiKey);
 
   // 2. Obtenir ou créer l'intégration
   const integration = await getOrCreateIntegration(apiKey, appName);
