@@ -11,63 +11,88 @@
         "DATABASE_URL",
         "DIRECT_URL",
         "REDIS_URL",
+
         "NEXT_PUBLIC_SUPABASE_URL",
         "NEXT_PUBLIC_SUPABASE_ANON_KEY",
         "SUPABASE_SERVICE_ROLE_KEY",
+
         "DOCUMENTS_BUCKET",
         "TOKEN_ENCRYPTION_KEY",
+
         "RESEND_API_KEY",
         "EMAIL_FROM",
         "RESEND_AUDIENCE_ID",
+
         "GOOGLE_OAUTH_CLIENT_ID",
         "GOOGLE_OAUTH_CLIENT_SECRET",
         "GOOGLE_OAUTH_REDIRECT_URI",
+
         "MICROSOFT_OAUTH_CLIENT_ID",
         "MICROSOFT_OAUTH_CLIENT_SECRET",
         "MICROSOFT_OAUTH_REDIRECT_URI",
+
         "NOTION_OAUTH_CLIENT_ID",
         "NOTION_OAUTH_CLIENT_SECRET",
         "NOTION_OAUTH_REDIRECT_URI",
+
         "SLACK_OAUTH_CLIENT_ID",
         "SLACK_OAUTH_CLIENT_SECRET",
         "SLACK_OAUTH_REDIRECT_URI",
         "SLACK_SIGNING_SECRET",
+
         "COMPOSIO_API_KEY",
+        "COMPOSIO_GMAIL_AUTH_CONFIG_ID",
+        "COMPOSIO_SLACK_AUTH_CONFIG_ID",
+        "COMPOSIO_NOTION_AUTH_CONFIG_ID",
+
         "AI_PROVIDER",
         "PERPLEXITY_API_KEY",
         "PERPLEXITY_MODEL",
         "PERPLEXITY_CHAT_MODEL",
+
         "OPENAI_API_KEY",
         "OPENAI_MODEL",
+
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_MODEL",
+
         "CLE_SONAR_API_KLOYYA2",
+
         "PAYMENT_PROVIDER",
         "RATE_LIMIT_PER_MINUTE",
+
         "NEXT_PUBLIC_POSTHOG_KEY",
         "NEXT_PUBLIC_POSTHOG_HOST",
         "POSTHOG_PERSONAL_API_KEY",
+
         "ENABLE_EXPERIMENTAL_COREPACK",
         "CRON_SECRET",
+
         "GOOGLE_PEOPLE_API_KEY",
+
         "VAPID_PUBLIC_KEY",
         "VAPID_PRIVATE_KEY",
+
         "NVIDIA_API_KEY",
         "NVIDIA_MODEL",
+
         "BETA_ALLOWED_EMAILS"
       ]
     },
+
     "dev": {
       "cache": false,
       "persistent": true
     },
+
     "lint": {},
+
     "typecheck": {
       "dependsOn": ["^build"]
     },
+
     "test": {
       "dependsOn": ["^build"]
     }
   }
 }
-
