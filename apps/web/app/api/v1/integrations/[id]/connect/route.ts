@@ -1,107 +1,134 @@
 import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
-import { initiateComposioConnection } from '@/server/integrations/composio-client';
+import { getComposioClient } from '@/server/integrations/composio-client';
 import { db } from '@kloyya/db';
 import { resolveStartContext } from '@/server/tenant';
 
-const SUPPORTED_APPS = new Set([
-  'gmail',
-  'slack',
-  'notion',
-  'google_drive',
-  'googledrive',
-  'drive',
-]);
-
-function normalizeAppName(value: string): string {
-  const normalized = value.trim().toLowerCase();
-  switch (normalized) {
-    case 'gmail': return 'GMAIL';
-    case 'slack': return 'SLACK';
-    case 'notion': return 'NOTION';
-    case 'google_drive':
-    case 'googledrive':
-    case 'drive': return 'GOOGLEDRIVE';
-    default: return normalized.toUpperCase();
-  }
-}
+const AUTH_CONFIG_IDS: Record<string, string | undefined> = {
+  gmail: process.env.COMPOSIO_GMAIL_AUTH_CONFIG_ID,
+  slack: process.env.COMPOSIO_SLACK_AUTH_CONFIG_ID,
+  notion: process.env.COMPOSIO_NOTION_AUTH_CONFIG_ID,
+  drive: process.env.COMPOSIO_GOOGLE_DRIVE_AUTH_CONFIG_ID,
+};
 
 export async function POST(
-  _request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
-    if (!id) {
-      return NextResponse.json({ error: 'Missing integration id' }, { status: 400 });
-    }
 
-    const appId = id.trim().toLowerCase();
-    if (!SUPPORTED_APPS.has(appId)) {
+    const appName = id.toLowerCase();
+
+    if (!appName) {
       return NextResponse.json(
-        { error: 'Unsupported integration', integration: appId, supported: [...SUPPORTED_APPS] },
+        { error: 'Integration ID is required' },
         { status: 400 }
       );
     }
 
-    // 1. Auth Supabase
+    const authConfigId = AUTH_CONFIG_IDS[appName];
+
+    if (!authConfigId) {
+      console.error(
+        `[Composio Connect] Missing auth config for integration: ${appName}`
+      );
+
+      return NextResponse.json(
+        {
+          error: `No Composio auth config configured for ${appName}`,
+        },
+        { status: 500 }
+      );
+    }
+
     const cookieStore = await cookies();
+
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
         cookies: {
-          getAll() { return cookieStore.getAll(); },
+          getAll() {
+            return cookieStore.getAll();
+          },
           setAll() {},
         },
       }
     );
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      console.error('[Integration Connect] Unauthorized');
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      console.error(
+        '[Composio Connect] Unauthorized:',
+        userError
+      );
+
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
     }
 
-    // 2. Contexte Tenant
-    const context = await resolveStartContext(db, user.id);
-    if (!context || !context.organizationId || !context.workspaceId) {
-      console.error('[Integration Connect] Missing organization/workspace', { userId: user.id });
-      return NextResponse.json({ error: 'User workspace is not configured' }, { status: 400 });
+    const ctx = await resolveStartContext(db, user.id);
+
+    if (!ctx?.organizationId || !ctx?.workspaceId) {
+      console.error(
+        '[Composio Connect] User profile incomplete'
+      );
+
+      return NextResponse.json(
+        { error: 'User profile incomplete' },
+        { status: 400 }
+      );
     }
 
-    const composioAppName = normalizeAppName(appId);
-    const entityId = `workspace:${context.workspaceId}`;
-    const redirectUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'https://app.kloyya.com'}/connections`;
-
-    console.warn('[Integration Connect] Initiating OAuth', {
-      app: composioAppName,
-      workspaceId: context.workspaceId,
+    console.warn('[Composio Connect] Initiating OAuth', {
+      app: appName,
+      userId: user.id,
+      workspaceId: ctx.workspaceId,
     });
 
-    // 3. Appel direct à l'API Composio (sans SDK déprécié)
-    const connection = await initiateComposioConnection(composioAppName, entityId, redirectUrl);
+    const composio = getComposioClient();
 
-    if (!connection.redirectUrl) {
-      throw new Error('Composio did not return a redirect URL');
-    }
+    /*
+     * Composio-managed OAuth:
+     * use connectedAccounts.link()
+     *
+     * This requires:
+     * - userId
+     * - authConfigId
+     */
+    const connectionRequest =
+      await composio.connectedAccounts.link(
+        user.id,
+        authConfigId
+      );
 
     return NextResponse.json({
-      success: true,
-      integration: appId,
-      redirectUrl: connection.redirectUrl,
-      connectedAccountId: connection.connectedAccountId,
-    }, { status: 200 });
-
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error('[Integration Connect] Failed:', errorMessage);
+      redirectUrl: connectionRequest.redirectUrl,
+      connectedAccountId:
+        connectionRequest.connectedAccountId,
+    });
+  } catch (error) {
+    console.error(
+      '[Composio Connect Error] CRITICAL:',
+      error
+    );
 
     return NextResponse.json(
       {
-        error: 'Failed to initiate integration connection',
-        details: errorMessage,
+        error: 'Internal Server Error',
+        details:
+          error instanceof Error
+            ? error.message
+            : String(error),
       },
       { status: 500 }
     );
