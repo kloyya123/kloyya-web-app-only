@@ -12,11 +12,10 @@ import { PERMISSION_LABEL, STATUS_META, providerIcon } from './source-meta';
 import { useIntegrationsActions } from '@/hooks/use-integrations-actions';
 
 /**
- * One connected source, with everything the spec's "Source Confidence &
- * Freshness" panel wants: confidence, last-updated, permission, status, and how
- * many recommendations lean on it.
+ * Displays one connected source with its confidence, freshness,
+ * permission, status, and recommendation usage.
  *
- * Note: this UI component does NOT call services directly — it uses a hook.
+ * Connection actions are handled through useIntegrationsActions.
  */
 export function SourceCard({ source }: { source: ConnectedSource }) {
   const Icon = providerIcon(source.provider);
@@ -48,6 +47,8 @@ export function SourceCard({ source }: { source: ConnectedSource }) {
     }
   }
 
+  const isConnected = source.status === 'healthy';
+
   return (
     <div
       className={cn(
@@ -73,14 +74,14 @@ export function SourceCard({ source }: { source: ConnectedSource }) {
         </div>
 
         <div>
-          {source.status === 'connected' ? (
+          {isConnected ? (
             <div className="flex items-center gap-3">
               <Image
                 src="/images/connected-badge.gif"
                 alt="Connecté"
-                className="rounded-sm"
                 width={24}
                 height={24}
+                className="h-6 w-6 rounded-sm"
                 unoptimized
               />
 
@@ -101,13 +102,13 @@ export function SourceCard({ source }: { source: ConnectedSource }) {
             <Badge tone="accent" withDot>
               Synchronisation…
             </Badge>
-          ) : source.status === 'paused' ? (
-            <Badge tone="neutral" withDot>
-              En pause
-            </Badge>
-          ) : source.status === 'error' ? (
+          ) : source.status === 'needs_attention' ? (
             <Badge tone="warning" withDot>
-              Erreur
+              Attention requise
+            </Badge>
+          ) : source.status === 'token_expired' ? (
+            <Badge tone="warning" withDot>
+              Session expirée
             </Badge>
           ) : (
             <button
@@ -123,9 +124,15 @@ export function SourceCard({ source }: { source: ConnectedSource }) {
       </div>
 
       <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
-        <Metric label="Confidence" value={`${source.confidence}%`} />
+        <Metric
+          label="Confidence"
+          value={`${source.confidence}%`}
+        />
 
-        <Metric label="Freshness" value={`${source.freshness}%`} />
+        <Metric
+          label="Freshness"
+          value={`${source.freshness}%`}
+        />
 
         <Metric
           label="Last sync"
@@ -172,9 +179,10 @@ function Metric({
   return (
     <div>
       <dt className="text-caption text-subtle">{label}</dt>
-      <dd className="text-small text-foreground tabular-nums">{value}</dd>
+      <dd className="text-small text-foreground tabular-nums">
+        {value}
+      </dd>
     </div>
   );
 }
-
 
