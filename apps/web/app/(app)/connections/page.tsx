@@ -77,7 +77,7 @@ export default function ConnectionsCallbackPage() {
         // (kept in-line to avoid top-level eslint-disable comments)
         // eslint-disable-next-line no-await-in-loop
         // eslint note: this narrow use is safe; if your ESLint config forbids it, replace with setInterval-based poll.
-        // @ts-ignore-next-line
+        // @ts-expect-error-next-line
         // eslint-disable-next-line no-undef
         // await new Promise((r) => setTimeout(r, 2000));
         // Using a small helper to avoid the no-await-in-loop rule complaining in some setups:
@@ -87,7 +87,7 @@ export default function ConnectionsCallbackPage() {
         // (the above is to appease strict linters across different configs)
         // Simple sleep:
         // eslint-disable-next-line no-await-in-loop
-        // @ts-ignore
+        // @ts-expect-error
         await new Promise((r) => setTimeout(r, 2000));
       }
       // If we get here, give the user a path back to the connections list.
