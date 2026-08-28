@@ -1,93 +1,153 @@
 /**
- * Client Composio utilisant l'API v3 officielle.
- * Supporte désormais la redirection automatique après succès.
+ * Client Composio — API v3 officielle.
+ *
+ * Les connexions sont liées au user_id Composio.
+ * Kloyya utilise l'id Supabase de l'utilisateur comme identité Composio.
  */
 
-const COMPOSIO_BASE_URL = 'https://backend.composio.dev/api/v3';
+const COMPOSIO_BASE_URL = "https://backend.composio.dev/api/v3";
+
+type ComposioConnectedAccount = {
+  id?: string;
+  user_id?: string;
+  status?: string;
+  toolkit?: {
+    slug?: string;
+  };
+  auth_config?: {
+    id?: string;
+  };
+  created_at?: string;
+  updated_at?: string;
+  status_reason?: string;
+};
+
+type ComposioConnectedAccountsResponse = {
+  items?: ComposioConnectedAccount[];
+  next_cursor?: string;
+  total_items?: number;
+};
 
 export function getComposioClient() {
   const apiKey = process.env.COMPOSIO_API_KEY;
 
   if (!apiKey) {
-    throw new Error('COMPOSIO_API_KEY is not configured in environment variables');
+    throw new Error(
+      "COMPOSIO_API_KEY is not configured in environment variables",
+    );
+  }
+
+  async function composioFetch(
+    path: string,
+    options: RequestInit = {},
+  ): Promise<Response> {
+    return fetch(`${COMPOSIO_BASE_URL}${path}`, {
+      ...options,
+      headers: {
+        "x-api-key": apiKey,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(options.headers ?? {}),
+      },
+      cache: "no-store",
+    });
   }
 
   return {
     connectedAccounts: {
       /**
-       * Crée un lien de session d'authentification
+       * Crée une session OAuth Composio.
        */
-      async link(userId: string, authConfigId: string, redirectUri?: string) {
-        const payload: any = {
+      async link(
+        userId: string,
+        authConfigId: string,
+        redirectUri?: string,
+      ) {
+        const payload: {
+          user_id: string;
+          auth_config_id: string;
+          callback_url?: string;
+        } = {
           user_id: userId,
           auth_config_id: authConfigId,
         };
 
-        // Ajoute l'URL de callback si fournie (le champ API v3 s'appelle "callback_url")
         if (redirectUri) {
           payload.callback_url = redirectUri;
         }
 
-        const res = await fetch(`${COMPOSIO_BASE_URL}/connected_accounts/link`, {
-          method: 'POST',
-          headers: {
-            'x-api-key': apiKey,
-            'Content-Type': 'application/json',
-          },
+        const res = await composioFetch("/connected_accounts/link", {
+          method: "POST",
           body: JSON.stringify(payload),
         });
 
         if (!res.ok) {
           const errorText = await res.text();
-          throw new Error(`Composio API error: HTTP ${res.status} - ${errorText}`);
+
+          throw new Error(
+            `Composio API error: HTTP ${res.status} - ${errorText}`,
+          );
         }
 
         const data = await res.json();
 
-        // Gestion robuste des différents formats de réponse
-        const finalRedirectUrl = 
-          data.redirectUrl || 
-          data.redirect_url || 
-          data.data?.redirectUrl || 
-          data.data?.redirect_url ||
-          data.link ||
-          data.url;
+        const redirectUrl =
+          data?.redirect_url ??
+          data?.redirectUrl ??
+          data?.data?.redirect_url ??
+          data?.data?.redirectUrl ??
+          data?.link ??
+          data?.url;
 
-        const connectedAccountId = 
-          data.connectedAccountId || 
-          data.connected_account_id ||
-          data.data?.connectedAccountId ||
-          data.data?.connected_account_id ||
+        const connectedAccountId =
+          data?.connected_account_id ??
+          data?.connectedAccountId ??
+          data?.data?.connected_account_id ??
+          data?.data?.connectedAccountId ??
           null;
 
-        if (!finalRedirectUrl) {
-          throw new Error(`Composio returned no redirect URL. Response: ${JSON.stringify(data)}`);
+        if (!redirectUrl) {
+          throw new Error(
+            `Composio returned no redirect URL. Response: ${JSON.stringify(data)}`,
+          );
         }
 
         return {
-          redirectUrl: finalRedirectUrl,
+          redirectUrl,
           connectedAccountId,
         };
       },
 
       /**
-       * Récupère les comptes connectés pour un workspace donné
+       * Liste les comptes connectés pour un utilisateur Kloyya.
+       *
+       * IMPORTANT :
+       * Le compte Composio est créé avec user_id.
+       * On doit donc utiliser user_ids ici et non entity_id=workspace:...
        */
-      async getConnectedAccounts(workspaceId: string) {
-        const res = await fetch(`${COMPOSIO_BASE_URL}/connected_accounts?entity_id=workspace:${workspaceId}`, {
-          headers: {
-            'x-api-key': apiKey,
-            'Content-Type': 'application/json',
-          },
-        });
+      async getConnectedAccounts(userId: string) {
+        const params = new URLSearchParams();
+
+        params.set("user_ids", userId);
+        params.set("limit", "100");
+
+        const res = await composioFetch(
+          `/connected_accounts?${params.toString()}`,
+        );
 
         if (!res.ok) {
           const errorText = await res.text();
-          throw new Error(`Composio API error fetching accounts: HTTP ${res.status} - ${errorText}`);
+
+          throw new Error(
+            `Composio API error fetching accounts: HTTP ${res.status} - ${errorText}`,
+          );
         }
 
-        return await res.json();
-      }
+        const data =
+          (await res.json()) as ComposioConnectedAccountsResponse;
+
+        return Array.isArray(data?.items) ? data.items : [];
+      },
     },
   };
 }
