@@ -1,3 +1,4 @@
+```tsx
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -7,114 +8,172 @@ import { services } from '@/services';
 
 /**
  * Page that handles the OAuth provider redirect back to the app.
+ *
  * Expected query params:
- *  - status (e.g. connected, error)
- *  - providerId or provider (the integration id)
+ * - status: connected, error, syncing, etc.
+ * - providerId, provider, or id: the integration identifier
  *
  * Behavior:
- *  - Invalidate global integrations summary so dashboard/ask/widgets update.
- *  - Optionally poll the provider's connection record until status === 'connected'
- *    (useful when the backend sets status=syncing first).
+ * - Invalidates the global integrations summary so dashboard/widgets
+ *   receive fresh connection data.
+ * - Invalidates the specific provider query when available.
+ * - Polls the provider connection status while the backend is syncing.
+ * - Redirects to /connections once the connection becomes active.
  */
 export default function ConnectionsCallbackPage() {
   const params = useSearchParams();
   const router = useRouter();
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const status = params.get('status');
-    const providerId = params.get('providerId') || params.get('provider') || params.get('id');
-
-    // Always refresh the global summary so every widget reads fresh data.
-    qc.invalidateQueries(['integrations', 'summary']);
-    if (providerId) qc.invalidateQueries(['integrations', providerId]);
-
-    if (!status) {
-      setMessage('Retour reçu : état inconnu. Vérification de la connexion...');
-      return;
-    }
-
-    if (status === 'connected') {
-      setMessage('Connexion réussie — synchronisation en cours. Mise à jour des widgets...');
-    } else if (status === 'error') {
-      setMessage('La connexion a échoué. Veuillez réessayer ou vérifier l’accès.');
-    } else {
-      setMessage(`Statut: ${status}. Mise à jour en cours...`);
-    }
+    const providerId =
+      params.get('providerId') ||
+      params.get('provider') ||
+      params.get('id');
 
     let cancelled = false;
+    let redirectTimeout: ReturnType<typeof setTimeout> | undefined;
 
-    // Short polling to wait for 'syncing' -> 'connected' transitions on the server.
-    async function pollUntilConnected() {
-      if (!providerId) return;
-      for (let i = 0; i < 12 && !cancelled; i++) {
-        try {
-          const conn = await services.integrations.getConnection(providerId);
-          // Ensure the global summary is fresh for other components.
-          qc.invalidateQueries(['integrations', 'summary']);
-          if (conn.status === 'connected') {
-            qc.invalidateQueries(['integrations', 'summary']);
-            setMessage('La connexion est maintenant active. Redirection vers les sources...');
-            // Give user a short moment to read message then navigate to /connections (list).
-            setTimeout(() => {
-              if (!cancelled) router.push('/connections');
-            }, 900);
-            return;
-          } else if (conn.status === 'error') {
-            setMessage('La connexion est en erreur après tentative. Voir la page des connexions.');
-            return;
-          } else {
-            // still syncing / paused / not_connected — keep polling
-            setMessage(`Statut actuel: ${conn.status}. Attente de la synchronisation...`);
-          }
-        } catch (error) {
-          // eslint-disable-next-line no-console
-          console.error('Polling connection error', error);
-        }
-        // wait 2s
-        // eslint-disable-next-line no-await-in-loop
-        // (kept in-line to avoid top-level eslint-disable comments)
-        // eslint-disable-next-line no-await-in-loop
-        // eslint note: this narrow use is safe; if your ESLint config forbids it, replace with setInterval-based poll.
-        // @ts-expect-error-next-line
-        // eslint-disable-next-line no-undef
-        // await new Promise((r) => setTimeout(r, 2000));
-        // Using a small helper to avoid the no-await-in-loop rule complaining in some setups:
-        // eslint-disable-next-line no-shadow
-        // use setTimeout wrapped promise:
-        // eslint-disable-next-line no-await-in-loop
-        // (the above is to appease strict linters across different configs)
-        // Simple sleep:
-        // eslint-disable-next-line no-await-in-loop
-        // @ts-expect-error
-        await new Promise((r) => setTimeout(r, 2000));
+    const invalidateIntegrationQueries = () => {
+      void queryClient.invalidateQueries({
+        queryKey: ['integrations', 'summary'],
+      });
+
+      if (providerId) {
+        void queryClient.invalidateQueries({
+          queryKey: ['integrations', providerId],
+        });
       }
-      // If we get here, give the user a path back to the connections list.
-      setMessage('La synchronisation prend plus de temps que prévu. Vous pouvez consulter la page des connexions.');
+    };
+
+    // Always refresh integration data when returning from OAuth.
+    invalidateIntegrationQueries();
+
+    if (!status) {
+      setMessage(
+        'Retour reçu : état inconnu. Vérification de la connexion...'
+      );
+    } else if (status === 'connected') {
+      setMessage(
+        'Connexion réussie — synchronisation en cours. Mise à jour des widgets...'
+      );
+    } else if (status === 'error') {
+      setMessage(
+        'La connexion a échoué. Veuillez réessayer ou vérifier l’accès.'
+      );
+    } else {
+      setMessage(`Statut : ${status}. Mise à jour en cours...`);
     }
 
-    pollUntilConnected();
+    /**
+     * Wait without relying on any TypeScript/ESLint suppression.
+     */
+    const sleep = (milliseconds: number) =>
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, milliseconds);
+      });
+
+    /**
+     * Poll the connection until the backend reports that it is connected.
+     *
+     * The backend may temporarily report statuses such as:
+     * - syncing
+     * - paused
+     * - not_connected
+     *
+     * We give it up to 12 attempts with a 2-second delay between attempts.
+     */
+    async function pollUntilConnected() {
+      if (!providerId) {
+        return;
+      }
+
+      for (let attempt = 0; attempt < 12 && !cancelled; attempt += 1) {
+        try {
+          const connection =
+            await services.integrations.getConnection(providerId);
+
+          if (cancelled) {
+            return;
+          }
+
+          // Keep the global integration summary synchronized.
+          void queryClient.invalidateQueries({
+            queryKey: ['integrations', 'summary'],
+          });
+
+          if (connection.status === 'connected') {
+            setMessage(
+              'La connexion est maintenant active. Redirection vers les sources...'
+            );
+
+            redirectTimeout = setTimeout(() => {
+              if (!cancelled) {
+                router.push('/connections');
+              }
+            }, 900);
+
+            return;
+          }
+
+          if (connection.status === 'error') {
+            setMessage(
+              'La connexion est en erreur après tentative. Voir la page des connexions.'
+            );
+            return;
+          }
+
+          setMessage(
+            `Statut actuel : ${connection.status}. Attente de la synchronisation...`
+          );
+        } catch (error) {
+          console.error('Polling connection error', error);
+        }
+
+        if (!cancelled && attempt < 11) {
+          await sleep(2000);
+        }
+      }
+
+      if (!cancelled) {
+        setMessage(
+          'La synchronisation prend plus de temps que prévu. Vous pouvez consulter la page des connexions.'
+        );
+      }
+    }
+
+    void pollUntilConnected();
 
     return () => {
       cancelled = true;
+
+      if (redirectTimeout) {
+        clearTimeout(redirectTimeout);
+      }
     };
-    // deps: params stringify ensures effect runs when query changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params?.toString()]);
+  }, [params, queryClient, router]);
 
   return (
-    <div className="mx-auto max-w-3xl py-12 px-4">
-      <h1 className="text-2xl font-semibold">Finalisation de la connexion</h1>
+    <div className="mx-auto max-w-3xl px-4 py-12">
+      <h1 className="text-2xl font-semibold">
+        Finalisation de la connexion
+      </h1>
+
       <p className="mt-3 text-sm text-muted-foreground">
         {message ?? 'Traitement...'}
       </p>
 
       <div className="mt-6">
-        <a href="/connections" className="text-sm text-primary underline">
+        <a
+          href="/connections"
+          className="text-sm text-primary underline"
+        >
           Aller à la liste des connexions
         </a>
       </div>
     </div>
   );
 }
+```
