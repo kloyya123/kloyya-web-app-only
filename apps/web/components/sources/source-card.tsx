@@ -1,5 +1,7 @@
+
 'use client';
 
+import Image from 'next/image';
 import { useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { Badge } from '@/components/ui';
@@ -24,14 +26,10 @@ export function SourceCard({ source }: { source: ConnectedSource }) {
 
   async function handleConnect() {
     setIsActioning(true);
+
     try {
-      await connect(source.definition.id);
-      // For OAuth flows this will typically navigate away; when it returns the
-      // callback page will invalidate caches. For mocks it resolves here and
-      // the hook already invalidates caches.
+      await connect(source.id);
     } catch (error) {
-      // surface or log the error for debugging
-      // eslint-disable-next-line no-console
       console.error('Connect error', error);
     } finally {
       setIsActioning(false);
@@ -40,10 +38,10 @@ export function SourceCard({ source }: { source: ConnectedSource }) {
 
   async function handleDisconnect() {
     setIsActioning(true);
+
     try {
-      await disconnect(source.definition.id);
+      await disconnect(source.id);
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error('Disconnect error', error);
     } finally {
       setIsActioning(false);
@@ -62,26 +60,30 @@ export function SourceCard({ source }: { source: ConnectedSource }) {
           <span className="bg-surface text-muted-foreground flex size-8 shrink-0 items-center justify-center rounded-md">
             <Icon aria-hidden="true" className="size-4" />
           </span>
+
           <div className="min-w-0">
             <p className="text-small text-foreground truncate font-medium">
               {source.displayName}
             </p>
-            <p className="text-caption text-subtle">{PERMISSION_LABEL[source.permission]}</p>
+
+            <p className="text-caption text-subtle">
+              {PERMISSION_LABEL[source.permission]}
+            </p>
           </div>
         </div>
 
-        {/* Status / action area */}
         <div>
           {source.status === 'connected' ? (
             <div className="flex items-center gap-3">
-              {/* Put your GIF in public/images/connected-badge.gif */}
-              <img
+              <Image
                 src="/images/connected-badge.gif"
                 alt="Connecté"
-                className="h-6 w-6 rounded-sm"
+                className="rounded-sm"
                 width={24}
                 height={24}
+                unoptimized
               />
+
               <Badge tone={status.tone} withDot>
                 Connecté
               </Badge>
@@ -92,7 +94,7 @@ export function SourceCard({ source }: { source: ConnectedSource }) {
                 disabled={isActioning}
                 className="ml-2 inline-flex items-center rounded-md border px-2 py-1 text-sm text-foreground disabled:opacity-50"
               >
-                Déconnecter
+                {isActioning ? 'Déconnexion…' : 'Déconnecter'}
               </button>
             </div>
           ) : source.status === 'syncing' ? (
@@ -108,24 +110,23 @@ export function SourceCard({ source }: { source: ConnectedSource }) {
               Erreur
             </Badge>
           ) : (
-            // not_connected
-            <div>
-              <button
-                type="button"
-                onClick={handleConnect}
-                disabled={isActioning}
-                className="inline-flex items-center rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-              >
-                Connecter
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={handleConnect}
+              disabled={isActioning}
+              className="inline-flex items-center rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {isActioning ? 'Connexion…' : 'Connecter'}
+            </button>
           )}
         </div>
       </div>
 
       <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
         <Metric label="Confidence" value={`${source.confidence}%`} />
+
         <Metric label="Freshness" value={`${source.freshness}%`} />
+
         <Metric
           label="Last sync"
           value={
@@ -134,6 +135,7 @@ export function SourceCard({ source }: { source: ConnectedSource }) {
             </time>
           }
         />
+
         <Metric
           label="Referenced by"
           value={
@@ -146,15 +148,27 @@ export function SourceCard({ source }: { source: ConnectedSource }) {
 
       {source.attentionReason ? (
         <div className="border-warning/30 bg-warning/10 mt-3 flex items-start gap-2 rounded-sm border px-3 py-2">
-          <AlertTriangle aria-hidden="true" className="text-caution mt-0.5 size-3.5 shrink-0" />
-          <p className="text-caption text-muted-foreground">{source.attentionReason}</p>
+          <AlertTriangle
+            aria-hidden="true"
+            className="text-caution mt-0.5 size-3.5 shrink-0"
+          />
+
+          <p className="text-caption text-muted-foreground">
+            {source.attentionReason}
+          </p>
         </div>
       ) : null}
     </div>
   );
 }
 
-function Metric({ label, value }: { label: string; value: React.ReactNode }) {
+function Metric({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
   return (
     <div>
       <dt className="text-caption text-subtle">{label}</dt>
@@ -162,3 +176,5 @@ function Metric({ label, value }: { label: string; value: React.ReactNode }) {
     </div>
   );
 }
+
+
