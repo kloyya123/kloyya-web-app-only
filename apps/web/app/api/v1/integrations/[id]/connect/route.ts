@@ -1,40 +1,31 @@
 import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { getComposioClient } from '@/server/integrations/composio-client';
 import { db } from '@kloyya/db';
 import { resolveStartContext } from '@/server/tenant';
 
-export const maxDuration = 60;
-
-const AUTH_CONFIG_IDS: Record<string, string | undefined> = {
-  gmail: process.env.COMPOSIO_GMAIL_AUTH_CONFIG_ID,
-  slack: process.env.COMPOSIO_SLACK_AUTH_CONFIG_ID,
-  notion: process.env.COMPOSIO_NOTION_AUTH_CONFIG_ID,
-  drive: process.env.COMPOSIO_GOOGLE_DRIVE_AUTH_CONFIG_ID,
-};
+function normalizeAppName(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  switch (normalized) {
+    case 'gmail': return 'GMAIL';
+    case 'slack': return 'SLACK';
+    case 'notion': return 'NOTION';
+    case 'google_drive':
+    case 'googledrive':
+    case 'drive': return 'GOOGLEDRIVE';
+    default: return normalized.toUpperCase();
+  }
+}
 
 export async function POST(
-  request: NextRequest,
+  _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
-    const appName = id.toLowerCase();
-
-    if (!appName) {
-      return NextResponse.json({ error: 'Integration ID is required' }, { status: 400 });
-    }
-
-    const authConfigId = AUTH_CONFIG_IDS[appName];
-
-    if (!authConfigId) {
-      console.error(`[Composio Connect] Missing auth config for integration: ${appName}`);
-      return NextResponse.json(
-        { error: `No Composio auth config configured for ${appName}` },
-        { status: 500 }
-      );
+    if (!id) {
+      return NextResponse.json({ error: 'Missing integration id' }, { status: 400 });
     }
 
     const cookieStore = await cookies();
@@ -49,50 +40,49 @@ export async function POST(
       }
     );
 
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-
-    if (userError || !user) {
-      console.error('[Composio Connect] Unauthorized:', userError);
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const ctx = await resolveStartContext(db, user.id);
-
-    if (!ctx?.organizationId || !ctx?.workspaceId) {
-      console.error('[Composio Connect] User profile incomplete');
-      return NextResponse.json({ error: 'User profile incomplete' }, { status: 400 });
+    const context = await resolveStartContext(db, user.id);
+    if (!context?.organizationId || !context?.workspaceId) {
+      return NextResponse.json({ error: 'User workspace is not configured' }, { status: 400 });
     }
 
-    console.warn('[Composio Connect] Initiating OAuth', {
-      app: appName,
-      userId: user.id,
-      workspaceId: ctx.workspaceId,
+    const composio = getComposioClient();
+    const composioAppName = normalizeAppName(id);
+    
+    // ✅ AJOUT CRUCIAL : Définir l'URL de votre application pour la redirection
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.kloyya.com';
+    const redirectUri = `${appUrl}/connections`; // Redirige vers la page des connexions après succès
+
+    // Récupérez l'ID de config approprié (adaptez cette ligne à votre logique de gestion des variables d'environnement)
+    const authConfigId = process.env[`COMPOSIO_${composioAppName}_AUTH_CONFIG_ID`] || process.env.COMPOSIO_AUTH_CONFIG_ID;
+
+    const connectionRequest = await composio.connectedAccounts.link({
+      user_id: user.id,
+      auth_config_id: authConfigId,
+      redirectUri: redirectUri, // ou callbackUrl selon la version exacte de votre SDK Composio
     });
 
-    const composio = getComposioClient();
-    
-    // Définit l'URL vers laquelle l'utilisateur sera redirigé après succès
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.kloyya.com';
-    const redirectUri = `${appUrl}/dashboard`; // Tu peux changer '/dashboard' en '/connections' si tu préfères
-
-    const connectionRequest = await composio.connectedAccounts.link(
-      user.id,
-      authConfigId,
-      redirectUri
-    );
+    if (!connectionRequest?.redirectUrl) {
+      throw new Error('Composio did not return a redirect URL');
+    }
 
     return NextResponse.json({
+      success: true,
+      integration: id,
       redirectUrl: connectionRequest.redirectUrl,
       connectedAccountId: connectionRequest.connectedAccountId,
-    });
+    }, { status: 200 });
 
   } catch (error) {
-    console.error('[Composio Connect Error] CRITICAL:', error);
-
+    console.error('[Composio Connect Error]:', error);
     return NextResponse.json(
-      {
-        error: 'Internal Server Error',
-        details: error instanceof Error ? error.message : String(error),
+      { 
+        error: 'Failed to initiate integration connection', 
+        details: error instanceof Error ? error.message : String(error) 
       },
       { status: 500 }
     );
