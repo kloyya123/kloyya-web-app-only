@@ -4,6 +4,9 @@ import { createServerClient } from '@supabase/ssr';
 import { getComposioClient } from '@/server/integrations/composio-client';
 import { db } from '@kloyya/db';
 import { resolveStartContext } from '@/server/tenant';
+import { markConnecting } from '@server/integrations/connect';
+import { encodeState } from '@server/integrations/state';
+import { config } from '@server/config';
 
 export async function POST(
   _request: Request,
@@ -40,17 +43,38 @@ export async function POST(
     }
 
     const authConfigId = process.env[`COMPOSIO_${composioAppName}_AUTH_CONFIG_ID`] || process.env.COMPOSIO_AUTH_CONFIG_ID;
-    const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL || 'https://app.kloyya.com'}/connections`;
-
     if (!authConfigId) {
       return NextResponse.json({ error: `Missing auth config ID for ${composioAppName}` }, { status: 500 });
     }
+    if (!config.TOKEN_ENCRYPTION_KEY) {
+      return NextResponse.json({ error: 'TOKEN_ENCRYPTION_KEY is not configured' }, { status: 500 });
+    }
 
-    // ✅ CORRECTION : Appel avec des arguments positionnels comme défini dans composio-client.ts
+    // ✅ Marque la connexion "en cours" immédiatement : la page /connections
+    // reflète l'état sans attendre le retour de Composio.
+    await markConnecting(db, context, id);
+
+    // ✅ state signé (même mécanisme que le flux OAuth natif) : porte
+    // userId/workspaceId/organizationId/integrationId à travers l'aller-retour
+    // chez Composio, sans dépendre des cookies de session au retour.
+    const state = encodeState(
+      {
+        userId: user.id,
+        workspaceId: context.workspaceId,
+        organizationId: context.organizationId,
+        integrationId: id,
+      },
+      config.TOKEN_ENCRYPTION_KEY,
+    );
+
+    const callbackUrl = new URL('/api/v1/integrations/composio/callback', config.APP_URL);
+    callbackUrl.searchParams.set('state', state);
+
+    // ✅ Même identité ("entité") des deux côtés : c'est ce qui manquait.
     const connectionRequest = await getComposioClient().connectedAccounts.link(
-      user.id,
+      `workspace:${context.workspaceId}`,
       authConfigId,
-      redirectUri
+      callbackUrl.toString(),
     );
 
     return NextResponse.json({
