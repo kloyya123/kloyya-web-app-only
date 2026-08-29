@@ -21,6 +21,41 @@ import { getComposioProxyFetch } from './composio-proxy';
  */
 const EXPIRY_SKEW_MS = 60 * 1000;
 
+export interface RefreshDeps {
+  clientId: string;
+  clientSecret: string;
+  fetchImpl?: typeof fetch;
+  /** Injectable so tests don't wait for a real clock. */
+  now?: () => number;
+  /**
+   * How this provider refreshes a token. Defaults to Google, so the three Google
+   * connectors need not pass it; Microsoft supplies its own, and a provider whose
+   * tokens never expire (Notion) never reaches this path at all.
+   */
+  refresh?: RefreshFn;
+}
+
+export type AccessTokenResult =
+  | { ok: true; accessToken: string; fetchImpl?: typeof fetch }
+  | { ok: false; reason: 'not_connected' | 'revoked' | 'refresh_failed' };
+
+/**
+ * The access token to call Google with, refreshing it if needed.
+ *
+ * Callers never touch the stored ciphertext; they ask for a token and get one
+ * that works, or a reason it can't. The refreshed token is re-encrypted before
+ * it is written back — there is no path here that puts a Google token in the
+ * database in the clear.
+ */
+export async function getValidAccessToken(
+  db: AppDb,
+  crypto: TokenCrypto,
+  ctx: StartContext,
+  integrationId: string,
+  deps: RefreshDeps,
+): Promise<AccessTokenResult> {
+  const now = deps.now ?? Date.now;
+
   const rows = await withTenantScope(db, ctx.organizationId, async (tx) =>
     tx
       .select({
@@ -49,64 +84,12 @@ const EXPIRY_SKEW_MS = 60 * 1000;
   if (row.composioConnectedAccountId) {
     return {
       ok: true,
-      accessToken: '__composio_managed__', // unused — the proxy fetch ignores it
+      accessToken: '__composio_managed__',
       fetchImpl: getComposioProxyFetch(row.composioConnectedAccountId),
     };
   }
 
   if (!row.accessTokenEnc || !row.refreshTokenEnc) return { ok: false, reason: 'not_connected' };
-
-export interface RefreshDeps {
-  clientId: string;
-  clientSecret: string;
-  fetchImpl?: typeof fetch;
-  /** Injectable so tests don't wait for a real clock. */
-  now?: () => number;
-  /**
-   * How this provider refreshes a token. Defaults to Google, so the three Google
-   * connectors need not pass it; Microsoft supplies its own, and a provider whose
-   * tokens never expire (Notion) never reaches this path at all.
-   */
-  refresh?: RefreshFn;
-}
-
-/**
- * The access token to call Google with, refreshing it if needed.
- *
- * Callers never touch the stored ciphertext; they ask for a token and get one
- * that works, or a reason it can't. The refreshed token is re-encrypted before
- * it is written back — there is no path here that puts a Google token in the
- * database in the clear.
- */
-export async function getValidAccessToken(
-  db: AppDb,
-  crypto: TokenCrypto,
-  ctx: StartContext,
-  integrationId: string,
-  deps: RefreshDeps,
-): Promise<AccessTokenResult> {
-  const now = deps.now ?? Date.now;
-
-  const rows = await withTenantScope(db, ctx.organizationId, async (tx) =>
-    tx
-      .select({
-        status: connections.status,
-        accessTokenEnc: connections.accessTokenEnc,
-        refreshTokenEnc: connections.refreshTokenEnc,
-        accessTokenExpiresAt: connections.accessTokenExpiresAt,
-      })
-      .from(connections)
-      .where(
-        and(
-          eq(connections.workspaceId, ctx.workspaceId),
-          eq(connections.integrationId, integrationId),
-        ),
-      )
-      .limit(1),
-  );
-
-  const row = rows[0];
-  if (!row?.accessTokenEnc || !row.refreshTokenEnc) return { ok: false, reason: 'not_connected' };
 
   const expiresAt = row.accessTokenExpiresAt?.getTime() ?? 0;
   const stillFresh = expiresAt - EXPIRY_SKEW_MS > now();
@@ -175,7 +158,7 @@ export async function getStaticAccessToken(
   crypto: TokenCrypto,
   ctx: StartContext,
   integrationId: string,
-): Promise
+): Promise<
   | { ok: true; accessToken: string; fetchImpl?: typeof fetch }
   | { ok: false; reason: 'not_connected' }
 > {
