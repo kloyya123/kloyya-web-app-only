@@ -6,6 +6,7 @@ import type { TokenCrypto } from '../crypto/tokens';
 import { refreshGoogleToken } from './google';
 import { AuthRevokedError, type RefreshFn } from './oauth';
 import type { StartContext } from './connect';
+import { getComposioProxyFetch } from './composio-proxy';
 
 /**
  * Keeping a connection alive.
@@ -20,9 +21,40 @@ import type { StartContext } from './connect';
  */
 const EXPIRY_SKEW_MS = 60 * 1000;
 
-export type AccessTokenResult =
-  | { ok: true; accessToken: string }
-  | { ok: false; reason: 'not_connected' | 'revoked' | 'refresh_failed' };
+  const rows = await withTenantScope(db, ctx.organizationId, async (tx) =>
+    tx
+      .select({
+        status: connections.status,
+        accessTokenEnc: connections.accessTokenEnc,
+        refreshTokenEnc: connections.refreshTokenEnc,
+        accessTokenExpiresAt: connections.accessTokenExpiresAt,
+        composioConnectedAccountId: connections.composioConnectedAccountId,
+      })
+      .from(connections)
+      .where(
+        and(
+          eq(connections.workspaceId, ctx.workspaceId),
+          eq(connections.integrationId, integrationId),
+        ),
+      )
+      .limit(1),
+  );
+
+  const row = rows[0];
+  if (!row) return { ok: false, reason: 'not_connected' };
+
+  // Composio-managed: Composio holds and refreshes the real provider token.
+  // Kloyya only needs the connected_account id to route calls through its
+  // proxy — there is nothing local to decrypt or refresh.
+  if (row.composioConnectedAccountId) {
+    return {
+      ok: true,
+      accessToken: '__composio_managed__', // unused — the proxy fetch ignores it
+      fetchImpl: getComposioProxyFetch(row.composioConnectedAccountId),
+    };
+  }
+
+  if (!row.accessTokenEnc || !row.refreshTokenEnc) return { ok: false, reason: 'not_connected' };
 
 export interface RefreshDeps {
   clientId: string;
@@ -143,10 +175,16 @@ export async function getStaticAccessToken(
   crypto: TokenCrypto,
   ctx: StartContext,
   integrationId: string,
-): Promise<{ ok: true; accessToken: string } | { ok: false; reason: 'not_connected' }> {
+): Promise
+  | { ok: true; accessToken: string; fetchImpl?: typeof fetch }
+  | { ok: false; reason: 'not_connected' }
+> {
   const rows = await withTenantScope(db, ctx.organizationId, async (tx) =>
     tx
-      .select({ accessTokenEnc: connections.accessTokenEnc })
+      .select({
+        accessTokenEnc: connections.accessTokenEnc,
+        composioConnectedAccountId: connections.composioConnectedAccountId,
+      })
       .from(connections)
       .where(
         and(
@@ -158,7 +196,17 @@ export async function getStaticAccessToken(
   );
 
   const row = rows[0];
-  if (!row?.accessTokenEnc) return { ok: false, reason: 'not_connected' };
+  if (!row) return { ok: false, reason: 'not_connected' };
+
+  if (row.composioConnectedAccountId) {
+    return {
+      ok: true,
+      accessToken: '__composio_managed__',
+      fetchImpl: getComposioProxyFetch(row.composioConnectedAccountId),
+    };
+  }
+
+  if (!row.accessTokenEnc) return { ok: false, reason: 'not_connected' };
   return { ok: true, accessToken: crypto.decrypt(row.accessTokenEnc) };
 }
 
