@@ -1,4 +1,3 @@
-
 /**
  * Client Composio utilisant l'API v3 officielle.
  *
@@ -20,8 +19,8 @@ type FetchOptions = RequestInit & {
   headers?: Record<string, string>;
 };
 
+// ✅ CORRECTION : Suppression de la ligne dupliquée "function getApiKey(): string {"
 export function getApiKey(): string {
-function getApiKey(): string {
   const apiKey = process.env.COMPOSIO_API_KEY;
 
   if (!apiKey) {
