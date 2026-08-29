@@ -20,6 +20,7 @@ type FetchOptions = RequestInit & {
   headers?: Record<string, string>;
 };
 
+export function getApiKey(): string {
 function getApiKey(): string {
   const apiKey = process.env.COMPOSIO_API_KEY;
 
