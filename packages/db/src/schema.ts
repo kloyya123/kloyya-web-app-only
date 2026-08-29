@@ -367,6 +367,7 @@ export const connections = pgTable(
     syncCursors: jsonb('sync_cursors').notNull().default(sql`'{}'::jsonb`),
     /** Human-readable, shown with a Reconnect action. Present only on 'error'. */
     errorReason: text('error_reason'),
+    composioConnectedAccountId: text('composio_connected_account_id'),
     ...audit,
   },
   (t) => [
