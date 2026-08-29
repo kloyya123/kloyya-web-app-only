@@ -65,6 +65,7 @@ export type StoreResult =
  * a missing refresh token, encrypt before storing, never write plaintext —
  * is identical, so it lives here once.
  */
+
 export async function storeProviderTokens(
   db: AppDb,
   crypto: TokenCrypto,
@@ -201,7 +202,44 @@ export function storeSlackTokens(
     noRefreshMessage: null,
   });
 }
-
+/**
+ * Persist a successful Composio connection.
+ *
+ * Composio holds and refreshes the actual OAuth tokens on its side — Kloyya
+ * never sees them. What lands here is just the connected_account id, which is
+ * enough to call tools through Composio later and enough for the rest of the
+ * app (dashboard, Ask Kloyya, the connection manager) to see this as
+ * 'connected', because they all read this same table.
+ */
+export async function storeComposioConnection(
+  db: AppDb,
+  ctx: StartContext,
+  integrationId: string,
+  connectedAccountId: string,
+): Promise<void> {
+  await withTenantScope(db, ctx.organizationId, async (tx) => {
+    await tx
+      .insert(connections)
+      .values({
+        organizationId: ctx.organizationId,
+        workspaceId: ctx.workspaceId,
+        integrationId,
+        status: 'connected',
+        connectedByUserId: ctx.userId,
+        composioConnectedAccountId: connectedAccountId,
+        errorReason: null,
+      })
+      .onConflictDoUpdate({
+        target: [connections.workspaceId, connections.integrationId],
+        set: {
+          status: 'connected',
+          connectedByUserId: ctx.userId,
+          composioConnectedAccountId: connectedAccountId,
+          errorReason: null,
+        },
+      });
+  });
+}
 /** Put a connection into `error` with a reason a human can act on. */
 export async function failConnection(
   db: AppDb,
